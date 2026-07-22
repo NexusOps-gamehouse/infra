@@ -3,7 +3,7 @@ name: gamehouse
 services:
   db:
     image: postgres:16-alpine
-    container_name: duo-db
+    container_name: gamehouse-db
     environment:
       POSTGRES_DB: ${DB_NAME:-duo}
       POSTGRES_USER: ${DB_USERNAME:-duo}
@@ -12,11 +12,70 @@ services:
       - "5432:5432"
     volumes:
       - duo-db-data:/var/lib/postgresql/data
+    networks:
+      - backend-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 3s
       retries: 5
 
+  backend:
+    build: ../backend
+    image: nexusops0713/gamehouse:backend-${BACKEND_VERSION:-local}
+    container_name: gamehouse-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/${DB_NAME:-duo}
+      DB_USERNAME: ${DB_USERNAME:-duo}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - backend-uploads:/app/uploads
+    networks:
+      - frontend-net
+      - backend-net
+    ports:
+      - "8080:8080"   # 로컬 디버깅용
+    healthcheck:
+      # 런타임 이미지에 curl 없음 → bash 로 포트 TCP 체크
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build: ../frontend
+    image: nexusops0713/gamehouse:frontend-${FRONTEND_VERSION:-local}
+    container_name: gamehouse-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - frontend-net
+    ports:
+      - "80:80"
+    healthcheck:
+      # localhost 는 컨테이너 내부에서 IPv6(::1)로 풀려 nginx(IPv4)와 안 붙음 → 127.0.0.1
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+# frontend-net: frontend↔backend / backend-net: backend↔db (db 격리)
+networks:
+  frontend-net:
+    driver: bridge
+  backend-net:
+    driver: bridge
+
 volumes:
   duo-db-data:
+  backend-uploads:
