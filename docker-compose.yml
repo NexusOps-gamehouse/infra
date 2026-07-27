@@ -22,7 +22,16 @@ services:
 
   backend:
     build: ../backend
-    image: nexusops0713/gamehouse:backend-${BACKEND_VERSION:-local}
+    image: nexusops0713/gamehouse:backend-${BACKEND_VERSION:-develop}
+    # CI가 linux/amd64로만 빌드한다. Apple Silicon(arm64) 맥에서
+    # 이 지정이 없으면 `no matching manifest for linux/arm64/v8` 로 실패한다.
+    # 맥에서는 Rosetta 에뮬레이션으로 돌아 기동이 느린 것이 정상이다.
+    platform: linux/amd64
+    # up 할 때마다 registry를 확인한다.
+    # develop 태그는 같은 이름에 계속 덮어써지므로(mutable),
+    # 이게 없으면 로컬에 캐시된 옛 이미지를 그대로 재사용해 배포가 반영되지 않는다.
+    # 로컬에서 소스로 빌드해 띄우려면 `docker compose up -d --build` 를 쓴다.
+    pull_policy: always
     container_name: gamehouse-backend
     depends_on:
       db:
@@ -35,6 +44,7 @@ services:
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost}
       UPLOAD_DIR: /app/uploads
+      RIOT_API_KEY: ${RIOT_API_KEY:?RIOT_API_KEY is required}
     volumes:
       - backend-uploads:/app/uploads
     networks:
@@ -52,7 +62,10 @@ services:
 
   frontend:
     build: ../frontend
-    image: nexusops0713/gamehouse:frontend-${FRONTEND_VERSION:-local}
+    image: nexusops0713/gamehouse:frontend-${FRONTEND_VERSION:-develop}
+    # backend와 동일. 상세 설명은 backend 쪽 주석 참고.
+    platform: linux/amd64
+    pull_policy: always
     container_name: gamehouse-frontend
     depends_on:
       backend:
