@@ -66,7 +66,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
       UPLOAD_DIR: /app/uploads
       RIOT_API_KEY: ${RIOT_API_KEY:?RIOT_API_KEY is required}
       # RabbitMQ STOMP 릴레이 접속 정보. host 는 compose 네트워크상의 서비스명.
@@ -99,13 +99,21 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    # 런타임 주입 → entrypoint 가 dist/config.js 생성.
+    # 기본값은 "비움" = 상대경로(/api,/ws) = ALB same-origin. 운영에서 env 를 안 줘도 안전한 값.
+    # 로컬은 serve 에 프록시가 없어 절대 URL 이 필요하므로 .env(.env.example) 에서 명시적으로 채운다.
+    #   (안 채우면 상대경로가 :5173 로 가 깨진다 → .env.example 의 FRONTEND_* 참고)
+    environment:
+      API_BASE_URL: ${FRONTEND_API_BASE_URL:-}
+      WS_URL: ${FRONTEND_WS_URL:-}
+      BACKEND_ORIGIN: ${FRONTEND_BACKEND_ORIGIN:-}
     networks:
       - frontend-net
     ports:
-      - "80:80"
+      - "5173:5173"
     healthcheck:
-      # localhost 는 컨테이너 내부에서 IPv6(::1)로 풀려 nginx(IPv4)와 안 붙음 → 127.0.0.1
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      # localhost 는 컨테이너 내부에서 IPv6(::1)로 풀릴 수 있어 서버(IPv4)와 안 붙음 → 127.0.0.1
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173/"]
       interval: 10s
       timeout: 3s
       retries: 3
