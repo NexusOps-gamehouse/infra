@@ -1,0 +1,423 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "수집 상태 (up)",
+      "description": "Prometheus 가 각 대상을 긁는 데 성공했는지. 1=UP, 0=DOWN. 여기가 빨간색이면 아래 그래프는 전부 믿을 수 없다.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "index": 0 } } },
+            { "type": "value", "options": { "1": { "text": "UP", "index": 1 } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "up",
+          "legendFormat": "{{job}}",
+          "instant": true
+        }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "전체 컨테이너 CPU %",
+      "description": "장애 대응의 출발점. 모든 gamehouse 컨테이너를 한 화면에 겹쳐 '누가 언제부터 바빠졌나'를 먼저 본다. 여기서 범인을 찾고 아래 개별 패널로 좁힌다.\n\n_total 로 끝나는 counter 는 누적값이라 rate() 로 감싼다. 결과 단위가 '코어 수'이므로 *100 이 %.\n\nA 쿼리는 컨테이너별, B 쿼리는 전체 합계(root cgroup). macOS Docker Desktop 에서는 cAdvisor 가 컨테이너별로 쪼개지 못해 A 가 비고 B 만 그려진다(환경 제약, 정상). Linux/EC2 에서는 둘 다 나온다.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 2,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "custom": { "lineWidth": 1, "fillOpacity": 8, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"], "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(container_cpu_usage_seconds_total{name=~\"gamehouse-.*\"}[1m]) * 100",
+          "legendFormat": "{{name}}"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(container_cpu_usage_seconds_total{id=\"/\"}[1m]) * 100",
+          "legendFormat": "전체 합계 (root)"
+        }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "전체 컨테이너 메모리",
+      "description": "working set = 회수 불가능한 실사용분. usage 는 캐시를 포함해 실제보다 크게 보이므로 OOM 판단에는 working set 을 쓴다.\n\n톱니처럼 오르내리면 GC 가 도는 정상 패턴, 한 방향으로 계속 우상향하면 누수 의심.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 3,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": { "lineWidth": 1, "fillOpacity": 8, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"], "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "container_memory_working_set_bytes{name=~\"gamehouse-.*\"}",
+          "legendFormat": "{{name}}"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "container_memory_working_set_bytes{id=\"/\"}",
+          "legendFormat": "전체 합계 (root)"
+        }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Backend CPU %",
+      "description": "같은 대상을 두 관점으로 본다.\nA = cAdvisor 가 밖에서 잰 컨테이너 CPU (macOS 에서는 안 나옴)\nB = JVM 이 스스로 보고한 프로세스 CPU (Actuator, macOS 에서도 나옴)\n\n두 값이 크게 어긋나면 컨테이너 안에 JVM 외의 부하가 있다는 뜻이다.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 4,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 12, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(container_cpu_usage_seconds_total{name=\"gamehouse-backend\"}[1m]) * 100",
+          "legendFormat": "컨테이너 (cAdvisor)"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "process_cpu_usage{job=\"backend\"} * 100",
+          "legendFormat": "JVM 프로세스 (Actuator)"
+        }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Backend 메모리",
+      "description": "JVM 힙까지 보고 싶으면 jvm_memory_used_bytes{area=\"heap\"} 를 함께 본다. 컨테이너 메모리는 힙 + 메타스페이스 + 스레드 스택 등을 모두 포함한다.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 5,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 12, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "container_memory_working_set_bytes{name=\"gamehouse-backend\"}",
+          "legendFormat": "backend (container)"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "jvm_memory_used_bytes{job=\"backend\",area=\"heap\"}",
+          "legendFormat": "JVM heap - {{id}}"
+        }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "앱 응답시간 p95 (엔드포인트별)",
+      "description": "요청 100건 중 95번째로 느린 요청의 소요 시간. 평균은 소수의 느린 요청을 가려버리므로 p95 를 본다.\n\n컨테이너 CPU 는 한가한데 이 값만 치솟으면 원인이 컨테이너 밖(DB, 외부 API, 네트워크)에 있다는 뜻이다.\n\n트래픽이 없으면 데이터도 없다 — 요청을 몇 번 보내면 나타난다.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "id": 6,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": { "lineWidth": 1, "fillOpacity": 5, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"], "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{job=\"backend\"}[5m])))",
+          "legendFormat": "p95 {{uri}}"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(http_server_requests_seconds_max{job=\"backend\"})",
+          "legendFormat": "최대 (버킷 없이도 나옴)"
+        }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "5xx 에러율 %",
+      "description": "전체 요청 대비 서버 오류(5xx) 비율. 사용자가 실제로 겪는 실패를 보여주는 지표라 CPU/메모리보다 우선한다.\n\n분자에 or vector(0) 을 붙여, 트래픽은 있고 에러가 없을 때 빈 화면 대신 0 이 그려지게 했다.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "id": 7,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 12, "showPoints": "never", "thresholdsStyle": { "mode": "line" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "100 * (sum(rate(http_server_requests_seconds_count{job=\"backend\",status=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(http_server_requests_seconds_count{job=\"backend\"}[5m])) or vector(0), 0.0001)",
+          "legendFormat": "5xx 비율"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"backend\"}[5m])) * 60",
+          "legendFormat": "분당 요청 수 (참고)",
+          "hide": false
+        }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "채팅 큐 적체 (rabbitmq_queue_messages_ready)",
+      "description": "브로커에 쌓여 아직 소비되지 않은 메시지 수. 계속 늘어나면 소비 속도가 생산 속도를 못 따라가는 것 = 채팅이 밀리고 있다.\n\n앱의 chat_messages_total 이 '얼마나 들어왔나'라면 이 값은 '얼마나 밀렸나'를 말해준다.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "id": 8,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 12, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"], "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rabbitmq_queue_messages_ready)",
+          "legendFormat": "대기 중 메시지"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "chat_active_sessions",
+          "legendFormat": "채팅 동시 접속자"
+        }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Riot API 429 발생 수 (5분)",
+      "description": "429 = Too Many Requests = 라이엇 레이트 리밋에 걸린 횟수. 0 이 아니면 호출량을 줄이거나 캐싱/큐잉이 필요하다는 신호.\n\n함께 보면 좋은 것: 전체 호출량 sum(rate(http_client_requests_seconds_count[1m]))*60, 응답 지연 p95.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "id": 9,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 15, "showPoints": "auto", "drawStyle": "bars" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(http_client_requests_seconds_count{job=\"backend\",status=\"429\"}[5m])) or vector(0)",
+          "legendFormat": "429 발생"
+        }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "호스트 디스크 여유",
+      "description": "컨테이너 지표로는 절대 볼 수 없는 층. 도커 이미지와 로그가 조용히 쌓이다 서비스 전체를 멈추게 하는 실전 1순위 장애 원인이다.\n\nfstype 필터로 tmpfs / overlay 같은 가상 파일시스템을 걸러낸다. 여러 mountpoint 중 용량이 가장 큰 것이 실제 루트 디스크. macOS 에서는 Docker Desktop VM 기준(/host/root), EC2 에서는 호스트 기준(/)으로 잡힌다.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "id": 10,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "min"], "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|ramfs|devtmpfs|squashfs|autofs|nsfs\"}",
+          "legendFormat": "{{mountpoint}}"
+        }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "호스트 메모리 여유 / 로드",
+      "description": "컨테이너 메모리가 여유로워도 호스트 전체가 말라 있으면 곧 OOM 으로 컨테이너가 강제 종료된다. 컨테이너 층과 호스트 층을 함께 봐야 하는 이유.\n\nload1 은 최근 1분 평균 실행 대기 프로세스 수. 코어 수를 넘으면 CPU 가 포화 상태다.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "id": 11,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "load1" },
+            "properties": [
+              { "id": "unit", "value": "short" },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "min"], "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "node_memory_MemAvailable_bytes",
+          "legendFormat": "사용 가능 메모리"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "node_load1",
+          "legendFormat": "load1"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["gamehouse", "observability"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "00 overview",
+  "uid": "gamehouse-overview",
+  "version": 2,
+  "weekStart": ""
+}
