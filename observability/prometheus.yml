@@ -1,0 +1,71 @@
+global:
+  scrape_interval: 15s          # 15초마다 회진
+  # 이 Prometheus 가 수집한 모든 시계열에 붙는 꼬리표.
+  # 로컬에서 만든 데이터와 EC2 데이터를 나중에 구분하기 위한 것.
+  # ${ENV_NAME} 치환은 compose 의 --enable-feature=expand-external-labels 로 활성화된다.
+  external_labels:
+    env: ${ENV_NAME}
+
+scrape_configs:
+  # ---------------------------------------------------------------------
+  # 수집기 자신 — Prometheus 가 살아 있는지, 시계열이 몇 개인지
+  #   prometheus_tsdb_head_series  : 현재 활성 시계열 수 (카디널리티 감시)
+  #   prometheus_target_scrape_pool_targets : 수집 대상 수
+  # ---------------------------------------------------------------------
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ---------------------------------------------------------------------
+  # 컨테이너 층 — 밖에서 본 CPU / 메모리 / 네트워크
+  # ---------------------------------------------------------------------
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]     # 누구를 긁을 것인가
+    # cAdvisor 는 컨테이너 하나당 수십 개의 메트릭을 뱉는다. macOS 에서는
+    # id="/" 하나뿐이라 티가 안 나지만, EC2(Linux)에서는 컨테이너별로 쪼개지면서
+    # 시계열이 수천~수만 개가 된다. 실제로 그래프에 쓰는 것만 남겨
+    # Prometheus 메모리와 디스크를 아낀다.
+    #
+    # 새 패널을 만들면서 "메트릭이 없다"면 이 목록에 빠져 있는지 먼저 확인할 것.
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'container_(cpu_usage_seconds_total|cpu_cfs_throttled_seconds_total|memory_working_set_bytes|memory_usage_bytes|spec_memory_limit_bytes|network_receive_bytes_total|network_transmit_bytes_total|fs_usage_bytes|last_seen|start_time_seconds)'
+        action: keep
+
+  # ---------------------------------------------------------------------
+  # 호스트 층 — EC2 자체의 디스크 / 메모리 / 로드
+  # 컨테이너는 멀쩡한데 호스트 디스크가 100% 라서 죽는 장애는 여기서만 보인다.
+  # ---------------------------------------------------------------------
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  # ---------------------------------------------------------------------
+  # 앱 층 — 컨테이너 밖에서는 볼 수 없는 앱 내부 사정
+  #   http_server_requests_*  응답시간 / 5xx 에러율
+  #   http_client_requests_*  Riot API 호출량 / 429 / 지연
+  #   hikaricp_*              DB 커넥션 풀
+  #   chat_*                  채팅 동시접속 / 메시지량 (커스텀)
+  #   jvm_*                   힙 / GC
+  #
+  # metrics_path 주의: Prometheus 기본값은 /metrics 지만
+  # Spring Actuator 는 /actuator/prometheus 에 노출한다.
+  # 포트도 앱 포트(8080)가 아니라 관리 포트(8081)다.
+  #
+  # 앱이 아직 안 떠 있으면 DOWN 으로 남았다가, 컨테이너가 뜨는 순간
+  # 자동으로 UP 이 된다. Prometheus 재시작이 필요 없다.
+  # ---------------------------------------------------------------------
+  - job_name: backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["gamehouse-backend:8081"]
+
+  # ---------------------------------------------------------------------
+  # 메시지 브로커 층 — 채팅이 밀리고 있는지
+  #   rabbitmq_queue_messages_ready 가 계속 늘면 소비가 생산을 못 따라가는 것
+  # RabbitMQ 3.8+ 내장 플러그인(rabbitmq_prometheus)이 15692 로 노출한다.
+  # ---------------------------------------------------------------------
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ["gamehouse-rabbitmq:15692"]
