@@ -526,101 +526,6 @@
     },
     {
       "type": "timeseries",
-      "title": "Riot API — 호출 결과 / 지연",
-      "description": "라이엇 연동이 '실패하고 있나(누락)' 와 '느려지고 있나(대기)' 를 함께 본다.\n\n왼쪽 축 — 분당 호출 수를 응답 상태별로 나눠 그린다.\n  200  정상\n  429  레이트 리밋에 걸림. 호출량을 줄이거나 캐싱이 필요하다는 신호\n  4xx  잘못된 요청 / 존재하지 않는 소환사 등\n  5xx  라이엇 서버 장애. 우리 잘못이 아니다\n\n오른쪽 축(점선) — p95 응답 지연(초). 이 값만 치솟고 우리 컨테이너 CPU 는 한가하면\n라이엇 쪽이 느린 것이고, 우리 CPU 도 함께 오르면 우리 문제다.\n\n선이 아예 없으면 호출이 한 번도 없었거나 계측이 안 걸린 것이다.\n(RiotConfig 가 주입받은 WebClient.Builder 를 쓰는지 확인)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 20
-      },
-      "id": 9,
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "decimals": 1,
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "auto"
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "p95 지연"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "s"
-              },
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "custom.fillOpacity",
-                "value": 0
-              },
-              {
-                "id": "custom.lineStyle",
-                "value": {
-                  "fill": "dash",
-                  "dash": [
-                    8,
-                    6
-                  ]
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (status) (rate(http_client_requests_seconds_count{job=\"backend\"}[5m])) * 60",
-          "legendFormat": "{{status}} (분당 호출)"
-        },
-        {
-          "refId": "C",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_client_requests_seconds_bucket{job=\"backend\"}[5m])))",
-          "legendFormat": "p95 지연"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
       "title": "호스트 디스크 사용률 / 여유",
       "description": "EC2 루트 EBS 볼륨(mountpoint=\"/\")의 사용률. 왼쪽 축이 % (75% 주황 / 85% 빨강),\n오른쪽 축 점선이 남은 용량이다.\n\n⚠️ macOS 로컬에서는 No data 가 정상이다.\nDocker Desktop 은 컨테이너를 VM 안에서 돌려 호스트 루트가 \"/\" 가 아닌\n\"/host/root\" 로 잡히고, 그 값은 맥의 실제 디스크도 아니다.\nEC2 에서는 \"/\" 하나로 깔끔하게 나온다.\n\n왜 이 패널이 필요한가:\n호스트 디스크가 100% 가 되어도 컨테이너 CPU/메모리 지표는 전부 정상으로 보인다.\ncAdvisor 의 사각지대라 이 층이 없으면 원인을 영원히 못 찾는다.\n디스크가 차면 PostgreSQL 쓰기 실패, 컨테이너 기동 불가, Prometheus 수집 중단이\n한꺼번에 발생한다.\n\n읽는 법: 절대값보다 '기울기'를 본다. 일주일에 3% 씩 오르면 두 달 여유,\n어제부터 하루 5% 씩 오르면 뭔가 새로 쌓이기 시작한 것이다.\n미리 알면 EBS 를 무중단으로 늘릴 수 있다.\n\n용량 산정과 대응 절차 → observability/README.md",
       "datasource": {
@@ -839,6 +744,149 @@
           "legendFormat": "CPU 포화도"
         }
       ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Riot 호출 횟수 (2분 / 100회 한도)",
+      "description": "개발용 API 키의 한도는 2분당 100회다. 최근 2분간 실제 호출 수를 응답 상태별로\n쌓아 올려, 전체 높이가 곧 총 호출 수가 되도록 했다. 빨간 점선이 한도(100)다.\n\n⚠️ 연동 1회에 API 를 4번 호출한다 (account → summoner → league → champion-mastery).\n   즉 2분에 25명만 연동해도 한도가 찬다. 생각보다 빡빡하다.\n\n읽는 법\n  전체 높이  최근 2분 총 호출 수. 점선(100)에 가까우면 곧 429 가 난다\n  200        정상 응답\n  429        레이트 리밋에 걸림. 이 조각이 보이면 이미 한도를 넘은 것\n  4xx        잘못된 요청 / 존재하지 않는 소환사 / 키 만료(403)\n  5xx        라이엇 서버 장애. 우리 잘못이 아니다\n\n  ~70    여유\n  70~100 주의. 시연이나 테스트를 몰아서 하면 곧 넘는다\n  100+   초과. 429 조각이 함께 나타난다\n\n한계\n  - 이 값은 '우리가 센 횟수'이지 라이엇이 센 값이 아니다. 정확히 하려면\n    응답 헤더 X-App-Rate-Limit-Count 를 읽어 Gauge 로 노출해야 한다(추후 과제).\n  - 또 하나의 한도인 '1초 20회'는 이 방식으로 볼 수 없다. 수집 주기가 30초라\n    1초 안의 순간 버스트가 평균으로 뭉개지기 때문이다.\n\n응답 지연이 궁금하면 Explore 에서:\n  histogram_quantile(0.95, sum by (le) (rate(http_client_requests_seconds_bucket{job=\"backend\"}[5m])))\n\n빈 화면이면 라이엇 호출이 없었던 것이다. 라벨 이름이 다를 수도 있으니\nExplore 에서 http_client_requests_seconds_count 를 조회해 client_name 값을 확인할 것.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "id": 9,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 40,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "한도 (100회)"
+            },
+            "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "429"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (status) (increase(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\"}[2m]))",
+          "legendFormat": "{{status}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "vector(100)",
+          "legendFormat": "한도 (100회)"
+        }
+      ]
     }
   ],
   "refresh": "30s",
@@ -858,6 +906,6 @@
   "timezone": "browser",
   "title": "00 overview",
   "uid": "gamehouse-overview",
-  "version": 5,
+  "version": 10,
   "weekStart": ""
 }
