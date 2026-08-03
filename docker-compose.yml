@@ -80,7 +80,8 @@ services:
       - frontend-net
       - backend-net
     ports:
-      - "8080:8080"   # 로컬 디버깅용
+      - "8080:8080" 
+        - "127.0.0.1:8081:8081"  # 로컬 디버깅용
     healthcheck:
       # 런타임 이미지에 curl 없음 → bash 로 포트 TCP 체크
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
