@@ -1,5 +1,5 @@
 global:
-  scrape_interval: 15s          # 15초마다 회진
+  scrape_interval: 30s          # 15초마다 회진
   # 이 Prometheus 가 수집한 모든 시계열에 붙는 꼬리표.
   # 로컬에서 만든 데이터와 EC2 데이터를 나중에 구분하기 위한 것.
   # ${ENV_NAME} 치환은 compose 의 --enable-feature=expand-external-labels 로 활성화된다.
