@@ -47,13 +47,44 @@ wait_for_health() {
   return 1
 }
 
+wait_for_actuator() {
+  local response=""
+
+  echo "Checking backend actuator..."
+
+  for _ in $(seq 1 30); do
+    response="$(
+      curl \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 5 \
+        http://127.0.0.1:8081/actuator/health \
+        2>/dev/null || true
+    )"
+
+    if grep -Eq '"status"[[:space:]]*:[[:space:]]*"UP"' <<< "${response}"; then
+      echo "Backend actuator: UP"
+      return 0
+    fi
+
+    echo "Backend actuator: waiting"
+    sleep 5
+  done
+
+  echo "Backend actuator health check timed out"
+  echo "${response}"
+  docker logs --tail=100 gamehouse-backend || true
+  return 1
+}
+
 echo "========================================"
 echo "GameHouse deployment started"
 echo "========================================"
 
 cd "${INFRA_DIR}"
 
-echo "[1/5] Updating infra repository..."
+echo "[1/6] Updating infra repository..."
 
 if [[ "$(id -u)" -eq 0 ]]; then
   sudo -u ssm-user -H \
@@ -62,19 +93,19 @@ else
   git pull --ff-only origin develop
 fi
 
-echo "[2/5] Validating Docker Compose..."
+echo "[2/6] Validating Docker Compose..."
 
 docker compose config >/dev/null
 
-echo "[3/5] Pulling Docker images..."
+echo "[3/6] Pulling Docker images..."
 
 docker compose pull
 
-echo "[4/5] Starting containers..."
+echo "[4/6] Starting containers..."
 
 docker compose up -d --remove-orphans
 
-echo "[5/5] Checking container health..."
+echo "[5/6] Checking container health..."
 
 for container in "${CONTAINERS[@]}"; do
   if ! wait_for_health "${container}"; then
@@ -86,6 +117,17 @@ for container in "${CONTAINERS[@]}"; do
     exit 1
   fi
 done
+
+echo "[6/6] Checking backend actuator..."
+
+if ! wait_for_actuator; then
+  echo "Deployment failed."
+
+  docker compose ps
+  docker compose logs --tail=100 backend
+
+  exit 1
+fi
 
 docker compose ps
 
