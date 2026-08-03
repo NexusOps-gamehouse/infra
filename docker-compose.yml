@@ -55,12 +55,39 @@ services:
     # 로컬에서 소스로 빌드해 띄우려면 `docker compose up -d --build` 를 쓴다.
     pull_policy: always
     container_name: gamehouse-backend
+    # t3.small(2GiB)에서 관찰 스택까지 얹으므로 컨테이너별 상한을 명시한다.
+    # 한계가 없으면 OOM killer 가 "가장 큰 프로세스" = 이 JVM 을 골라 죽인다.
+    mem_limit: 700m
     depends_on:
       db:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
     environment:
+      # ---- 메모리 상한 ------------------------------------------------------
+      # 측정값(로컬, 유휴 상태): RSS 565MB = 힙 87 + 비힙 158 + 미추적 네이티브 321
+      # 미추적분이 가장 크고, 그중 상당량이 스레드 스택(121개)과 glibc 메모리 풀이다.
+      #
+      # glibc 는 스레드마다 메모리 풀(arena)을 만들어 RSS 를 부풀린다.
+      # 컨테이너 자바에서 잘 알려진 현상으로, 2 로 제한하면 보통 50~100MB 줄어든다.
+      MALLOC_ARENA_MAX: "2"
+      #
+      # Dockerfile 의 ENTRYPOINT 가 exec form(["java","-jar",...])이라 명령줄에
+      # JVM 옵션을 끼워 넣을 수 없다. JAVA_TOOL_OPTIONS 는 JVM 이 기동 시 자동으로
+      # 읽는 환경변수라, 이미지를 다시 만들지 않고 옵션을 주입할 수 있다.
+      # 적용되면 기동 로그에 "Picked up JAVA_TOOL_OPTIONS: ..." 가 찍힌다.
+      #
+      #   -Xmx200m                  : 미지정 시 JVM 은 mem_limit 의 25%(=175m)를
+      #                               힙 최대치로 잡는다. 현재 committed 가 87m 이므로
+      #                               2배 여유를 두되 무제한 성장은 막는다.
+      #   -Xss512k                  : 스레드당 스택 1MB → 512KB. 스레드가 121개라 체감이 크다.
+      #   -XX:MaxDirectMemorySize   : 미지정 시 기본값이 -Xmx 와 같다. WebFlux(netty)가
+      #                               Direct 버퍼를 쓰므로 별도로 천장을 씌운다.
+      #
+      # MaxMetaspaceSize 는 일부러 넣지 않았다. 비힙이 아직 JIT 워밍업으로 상승 중이라
+      # 안정된 값을 확인한 뒤에 정하는 것이 맞다.
+      JAVA_TOOL_OPTIONS: "-Xmx200m -Xss512k -XX:MaxDirectMemorySize=64m"
+      # ----------------------------------------------------------------------
       DB_URL: jdbc:postgresql://db:5432/${DB_NAME:-duo}
       DB_USERNAME: ${DB_USERNAME:-duo}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
