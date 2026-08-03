@@ -95,7 +95,7 @@
     {
       "type": "timeseries",
       "title": "전체 컨테이너 CPU %",
-      "description": "장애 대응의 출발점. 모든 컨테이너를 한 화면에 겹쳐 '누가 언제부터 바빠졌나'를 먼저 본다.\n\n100% = CPU 코어 1개를 꽉 쓰는 중. 코어가 여러 개면 100% 를 넘을 수 있다.\n\nA = 컨테이너별 (EC2 에서 나옴)\nB = 전체 합계 (macOS 에서도 나옴)",
+      "description": "장애 대응의 출발점. 모든 컨테이너를 한 화면에 겹쳐 '누가 언제부터 바빠졌나'를 먼저 본다.\n컨테이너를 따로따로 보면 비교가 안 되어 범인을 못 찾는다.\n\n100% = CPU 코어 1개를 꽉 쓰는 중. 상한이 아니다 —\n코어가 여러 개면 100% 를 넘을 수 있다(t3.small 은 2코어이므로 최대 200%).\n\n_total 로 끝나는 counter 는 누적값이라 rate() 로 감싼다.\n결과 단위가 '코어 수'이므로 *100 이 %.\n\n호스트 전체 CPU 는 아래 '호스트 메모리 여유 / CPU 포화도' 패널에서 본다.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -144,22 +144,13 @@
           },
           "expr": "rate(container_cpu_usage_seconds_total{name=~\"gamehouse-.*\"}[1m]) * 100",
           "legendFormat": "{{name}}"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(container_cpu_usage_seconds_total{id=\"/\"}[1m]) * 100",
-          "legendFormat": "전체 합계"
         }
       ]
     },
     {
       "type": "timeseries",
       "title": "전체 컨테이너 메모리",
-      "description": "단위는 MB / GB (1000 단위). Grafana 의 MiB(1024 단위)와는 약 5% 차이가 나지만\n감시 목적에는 영향이 없어 익숙한 표기를 쓴다.\n\n대략의 정상 범위 (참고용)\n  backend (Spring Boot) — 300~600 MB\n  db (PostgreSQL)       — 30~100 MB\n  rabbitmq              — 100~200 MB\n  frontend (serve)      — 30~80 MB\n\n중요한 것은 절대값보다 '모양'이다. 톱니처럼 오르내리면 GC 가 도는 정상 패턴,\n한 방향으로 계속 우상향하면 누수를 의심한다.\n\nworking set = 회수 불가능한 실사용분. usage 는 캐시를 포함해 부풀려 보이므로\nOOM 판단에는 working set 을 쓴다.",
+      "description": "단위는 MB / GB (1000 단위). Grafana 의 MiB(1024 단위)와는 약 5% 차이가 나지만\n감시 목적에는 영향이 없어 익숙한 표기를 쓴다.\n\n대략의 정상 범위 (참고용)\n  backend (Spring Boot) — 300~600 MB\n  db (PostgreSQL)       — 30~100 MB\n  rabbitmq              — 100~200 MB\n  frontend (serve)      — 30~80 MB\n\n중요한 것은 절대값보다 '모양'이다. 톱니처럼 오르내리면 GC 가 도는 정상 패턴,\n한 방향으로 계속 우상향하면 누수를 의심한다.\n\nworking set = 회수 불가능한 실사용분. usage 는 캐시를 포함해 부풀려 보이므로\nOOM 판단에는 working set 을 쓴다.\n\n호스트 전체 메모리는 아래 '호스트 메모리 여유 / CPU 포화도' 패널에서 본다.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -208,15 +199,6 @@
           },
           "expr": "container_memory_working_set_bytes{name=~\"gamehouse-.*\"}",
           "legendFormat": "{{name}}"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "container_memory_working_set_bytes{id=\"/\"}",
-          "legendFormat": "컨테이너 전체 합계"
         }
       ]
     },
@@ -887,6 +869,83 @@
           "legendFormat": "한도 (100회)"
         }
       ]
+    },
+    {
+      "type": "timeseries",
+      "title": "네트워크 송수신 (컨테이너별)",
+      "description": "'요청이 몇 건 왔나'(요청량 패널)와 '데이터가 얼마나 오갔나'는 다른 이야기다.\n요청 1건이 수 MB 일 수도, 작은 요청이 수천 건일 수도 있다.\n\n위쪽(양수) = 수신, 아래쪽(음수) = 송신. 위아래 대칭이라 균형이 한눈에 보인다.\n\ngamehouse 에서 이 패널이 쓸모 있는 경우\n  · /uploads/** 이미지 서빙 — 요청 수는 적은데 트래픽만 큰 상황을 잡아낸다\n  · WebSocket 채팅 — 연결이 끊기지 않고 계속 열려 있어 요청 수로는 안 잡히지만\n    트래픽은 계속 흐른다. 접속자가 늘 때 실제 부하 증가는 여기서 보인다\n  · backend ↔ db 트래픽 — 비효율적인 쿼리가 대량 데이터를 실어 나르는 것을 발견\n\n⚠️ t3.small 은 네트워크도 크레딧 방식이다. 순간적으로 빠르지만 지속 사용량이\n   baseline(대략 16 MB/s)을 넘으면 크레딧이 소진되고 속도가 떨어진다.\n   'CPU 도 메모리도 멀쩡한데 갑자기 느려짐'의 범인이 될 수 있다.\n\ninterface 라벨(eth0 등)이 있어 sum by (name) 으로 컨테이너 단위로 묶었다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "id": 14,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "axisCenteredZero": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "송신.*"
+            },
+            "properties": [
+              {
+                "id": "custom.transform",
+                "value": "negative-Y"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (name) (rate(container_network_receive_bytes_total{name=~\"gamehouse-.*\"}[5m]))",
+          "legendFormat": "수신 {{name}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))",
+          "legendFormat": "송신 {{name}}"
+        }
+      ]
     }
   ],
   "refresh": "30s",
@@ -906,6 +965,6 @@
   "timezone": "browser",
   "title": "00 overview",
   "uid": "gamehouse-overview",
-  "version": 10,
+  "version": 12,
   "weekStart": ""
 }
