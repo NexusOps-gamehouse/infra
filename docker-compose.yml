@@ -10,8 +10,7 @@ services:
       # guest/guest 는 localhost 외부 접속이 막혀 있어 전용 계정을 만든다.
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-appuser}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
-    ports:
-      - "15672:15672"   # 관리 UI (로컬 디버깅용). STOMP(61613)는 컨테이너 간 통신이라 노출 불필요
+    #ports 삭제함 / 어차피 networks : backend-net으로 내부통신은 가능해서 외부에서 접속할 필요 없어보여서 일단 제거 
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     networks:
@@ -118,7 +117,7 @@ services:
       - frontend-net
     ports:
       - "80:5173"
-      - "5173:5173"
+#     - "5173:5173" // Dev 환경에서도 80 포트만 사용하므로 5173은 외부에 공개하지 않는다.
     healthcheck:
       # localhost 는 컨테이너 내부에서 IPv6(::1)로 풀릴 수 있어 서버(IPv4)와 안 붙음 → 127.0.0.1
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173/"]
