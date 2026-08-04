@@ -177,18 +177,29 @@ docker compose -f "${OBSERVE_FILE}" up -d --remove-orphans
 # Prometheus 프로세스는 기동 시 읽은 옛 설정을 계속 들고 도는 상태가 된다.
 # 새 수집 대상(job)을 추가해도 대시보드에 나타나지 않는 원인이 이것이다.
 #
-# SIGHUP 으로 설정만 다시 읽게 할 수도 있지만 그렇게 하지 않는다.
-# SIGHUP 리로드는 설정이 깨져도 Prometheus 가 옛 설정을 유지한 채 로그에만 남기고
-# 계속 돌기 때문에, 성공했는지 확인하려면 메트릭을 파싱해 비교해야 한다.
-# 그 확인 코드가 실제로 두 번 오작동했다(리로드는 됐는데 배포가 실패로 끊김).
+# 그런데 SIGHUP 도, restart 도 이것만으로는 부족하다. 더 밑에 함정이 하나 더 있다.
 #
-# restart 는 그런 확인이 필요 없다. 설정이 깨져 있으면 Prometheus 가 아예 기동에
-# 실패하고, 바로 아래 [9/9] 헬스체크가 그걸 잡는다. 검증이 공짜로 따라온다.
-# 대가는 수집이 몇 초 비는 것뿐이다.
+#   volumes:
+#     - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+#
+# Docker 가 "파일 하나"를 마운트할 때는 그 파일의 inode 에 묶는다.
+# 그런데 git pull 은 파일을 제자리에서 고치지 않고 지웠다가 새로 만든다(=새 inode).
+# 그래서 호스트의 파일은 최신인데 컨테이너 안에서는 옛 inode 를 계속 보게 된다.
+# 이 상태에서 SIGHUP 을 보내면 Prometheus 는 '옛 파일'을 성공적으로 다시 읽고,
+# 로그에는 "Completed loading of configuration file" 이라고 남긴다. 완벽한 거짓 성공이다.
+#
+# restart 도 같은 컨테이너를 다시 시작하는 것이라 마운트가 그대로다.
+# --force-recreate 로 컨테이너를 새로 만들어야 경로가 다시 해석된다.
+#
+# 덤으로 검증도 공짜로 따라온다. 설정이 깨져 있으면 새 컨테이너가 기동에 실패하고,
+# 바로 아래 [9/9] 헬스체크가 그걸 잡는다. 대가는 수집이 몇 초 비는 것뿐이다.
+#
+# (Grafana 는 디렉터리를 마운트하므로 이 문제가 없다. 경로를 그때그때 해석한다.
+#  대시보드 JSON 만 잘 반영되고 prometheus.yml 만 안 되던 이유가 이것이었다)
 # ---------------------------------------------------------------------------
-echo "[8/9] Restarting Prometheus to apply config..."
+echo "[8/9] Recreating Prometheus to apply config..."
 
-docker compose -f "${OBSERVE_FILE}" restart prometheus
+docker compose -f "${OBSERVE_FILE}" up -d --force-recreate prometheus
 
 echo "[9/9] Checking observability container health..."
 
