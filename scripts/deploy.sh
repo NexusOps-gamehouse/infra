@@ -12,6 +12,22 @@ CONTAINERS=(
   "gamehouse-frontend"
 )
 
+# 관측 스택은 별도 compose 프로젝트(name: gamehouse-observe)라 기본 파일만 보는
+# `docker compose` 명령에 잡히지 않는다. -f 로 명시해야 한다.
+#
+# 순서가 중요하다. 이 스택은 gamehouse_backend-net 을 external 로 참조하므로
+# 본 스택이 먼저 떠 있어야 한다. 그래서 본 스택 기동/헬스체크가 끝난 뒤에 올린다.
+OBSERVE_FILE="docker-compose.observability.yml"
+
+# 관측 컨테이너에는 healthcheck 를 정의하지 않았으므로
+# wait_for_health 는 .State.Status(=running) 로 판정한다.
+OBSERVE_CONTAINERS=(
+  "gamehouse-cadvisor"
+  "gamehouse-node-exporter"
+  "gamehouse-prometheus"
+  "gamehouse-grafana"
+)
+
 wait_for_health() {
   local container="$1"
   local status=""
@@ -84,7 +100,7 @@ echo "========================================"
 
 cd "${INFRA_DIR}"
 
-echo "[1/6] Updating infra repository..."
+echo "[1/8] Updating infra repository..."
 
 if [[ "$(id -u)" -eq 0 ]]; then
   sudo -u ssm-user -H \
@@ -93,19 +109,22 @@ else
   git pull --ff-only origin develop
 fi
 
-echo "[2/6] Validating Docker Compose..."
+echo "[2/8] Validating Docker Compose..."
 
+# 두 파일 모두 검증한다. .env 에 GF_ADMIN_PASSWORD 같은 필수값이 빠져 있으면
+# 컨테이너를 건드리기 전에 여기서 멈추는 편이 안전하다.
 docker compose config >/dev/null
+docker compose -f "${OBSERVE_FILE}" config >/dev/null
 
-echo "[3/6] Pulling Docker images..."
+echo "[3/8] Pulling Docker images..."
 
 docker compose pull
 
-echo "[4/6] Starting containers..."
+echo "[4/8] Starting containers..."
 
 docker compose up -d --remove-orphans
 
-echo "[5/6] Checking container health..."
+echo "[5/8] Checking container health..."
 
 for container in "${CONTAINERS[@]}"; do
   if ! wait_for_health "${container}"; then
@@ -118,7 +137,7 @@ for container in "${CONTAINERS[@]}"; do
   fi
 done
 
-echo "[6/6] Checking backend actuator..."
+echo "[6/8] Checking backend actuator..."
 
 if ! wait_for_actuator; then
   echo "Deployment failed."
@@ -129,7 +148,43 @@ if ! wait_for_actuator; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# 관측 스택
+#
+# 여기까지 왔다면 앱은 이미 정상 기동한 상태다. 아래에서 실패해도 앱은 살아 있고,
+# "관측이 깨졌다"는 사실만 파이프라인에 빨간불로 알리는 것이 목적이다.
+#
+# up -d 는 설정과 이미지가 그대로면 컨테이너를 재생성하지 않는다(멱등).
+# 따라서 backend/frontend 배포에서 매번 같이 돌려도 부담이 없고,
+# prometheus.yml 이나 datasources.yml 이 바뀐 배포에서만 실제로 교체된다.
+#
+# 참고: Grafana 대시보드 JSON 은 dashboards.yml 의 updateIntervalSeconds: 30
+#       덕분에 재기동 없이도 반영되지만, prometheus.yml 은 --web.enable-lifecycle
+#       이 꺼져 있어 reload API 가 막혀 있으므로 재기동이 유일한 반영 수단이다.
+# ---------------------------------------------------------------------------
+echo "[7/8] Starting observability stack..."
+
+# cadvisor 가 :latest 태그라 pull 할 때마다 상위 버전이 내려올 수 있다.
+# 배포 재현성을 위해 고정 태그로 되돌리는 것을 권장한다.
+docker compose -f "${OBSERVE_FILE}" pull
+docker compose -f "${OBSERVE_FILE}" up -d --remove-orphans
+
+echo "[8/8] Checking observability container health..."
+
+for container in "${OBSERVE_CONTAINERS[@]}"; do
+  if ! wait_for_health "${container}"; then
+    echo "Observability stack failed to start."
+    echo "The application itself is running - only monitoring is degraded."
+
+    docker compose -f "${OBSERVE_FILE}" ps
+    docker compose -f "${OBSERVE_FILE}" logs --tail=100
+
+    exit 1
+  fi
+done
+
 docker compose ps
+docker compose -f "${OBSERVE_FILE}" ps
 
 # 롤백 방식을 만든 뒤 활성화하는 것을 권장합니다.
 # docker image prune -f
