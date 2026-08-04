@@ -6,7 +6,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 CONTAINERS=(
-  "gamehouse-db"
   "gamehouse-rabbitmq"
   "gamehouse-backend"
   "gamehouse-frontend"
