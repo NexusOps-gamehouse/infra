@@ -100,7 +100,7 @@ echo "========================================"
 
 cd "${INFRA_DIR}"
 
-echo "[1/8] Updating infra repository..."
+echo "[1/9] Updating infra repository..."
 
 if [[ "$(id -u)" -eq 0 ]]; then
   sudo -u ssm-user -H \
@@ -109,22 +109,22 @@ else
   git pull --ff-only origin develop
 fi
 
-echo "[2/8] Validating Docker Compose..."
+echo "[2/9] Validating Docker Compose..."
 
 # 두 파일 모두 검증한다. .env 에 GF_ADMIN_PASSWORD 같은 필수값이 빠져 있으면
 # 컨테이너를 건드리기 전에 여기서 멈추는 편이 안전하다.
 docker compose config >/dev/null
 docker compose -f "${OBSERVE_FILE}" config >/dev/null
 
-echo "[3/8] Pulling Docker images..."
+echo "[3/9] Pulling Docker images..."
 
 docker compose pull
 
-echo "[4/8] Starting containers..."
+echo "[4/9] Starting containers..."
 
 docker compose up -d --remove-orphans
 
-echo "[5/8] Checking container health..."
+echo "[5/9] Checking container health..."
 
 for container in "${CONTAINERS[@]}"; do
   if ! wait_for_health "${container}"; then
@@ -137,7 +137,7 @@ for container in "${CONTAINERS[@]}"; do
   fi
 done
 
-echo "[6/8] Checking backend actuator..."
+echo "[6/9] Checking backend actuator..."
 
 if ! wait_for_actuator; then
   echo "Deployment failed."
@@ -159,17 +159,47 @@ fi
 # prometheus.yml 이나 datasources.yml 이 바뀐 배포에서만 실제로 교체된다.
 #
 # 참고: Grafana 대시보드 JSON 은 dashboards.yml 의 updateIntervalSeconds: 30
-#       덕분에 재기동 없이도 반영되지만, prometheus.yml 은 --web.enable-lifecycle
-#       이 꺼져 있어 reload API 가 막혀 있으므로 재기동이 유일한 반영 수단이다.
+#       덕분에 재기동 없이도 반영되지만, prometheus.yml 은 사정이 다르다.
+#       아래 [8/9] 참고.
 # ---------------------------------------------------------------------------
-echo "[7/8] Starting observability stack..."
+echo "[7/9] Starting observability stack..."
 
 # cadvisor 가 :latest 태그라 pull 할 때마다 상위 버전이 내려올 수 있다.
 # 배포 재현성을 위해 고정 태그로 되돌리는 것을 권장한다.
 docker compose -f "${OBSERVE_FILE}" pull
 docker compose -f "${OBSERVE_FILE}" up -d --remove-orphans
 
-echo "[8/8] Checking observability container health..."
+# ---------------------------------------------------------------------------
+# prometheus.yml 다시 읽히기
+#
+# 이 파일은 bind mount 다. 내용이 바뀌어도 compose 입장에서는 "설정이 그대로"이므로
+# 위의 up -d 가 컨테이너를 재생성하지 않는다. 그 결과 디스크의 파일은 최신인데
+# Prometheus 프로세스는 기동 시 읽은 옛 설정을 계속 들고 도는 상태가 된다.
+# 새 수집 대상(job)을 추가해도 대시보드에 나타나지 않는 원인이 이것이다.
+#
+# SIGHUP 은 --web.enable-lifecycle 과 무관하게 항상 동작한다.
+# (그 플래그는 HTTP 엔드포인트 /-/reload 만 통제한다)
+# 재기동이 아니라 설정만 다시 읽는 것이라 수집 공백이 생기지 않는다.
+#
+# 설정이 깨져 있으면 Prometheus 는 옛 설정을 유지한 채 로그에만 남기고 넘어간다.
+# 조용히 실패하므로 반드시 결과를 확인한다.
+# ---------------------------------------------------------------------------
+echo "[8/9] Reloading Prometheus config..."
+
+docker kill -s HUP gamehouse-prometheus >/dev/null
+
+sleep 3
+
+if curl -fsS --max-time 5 http://127.0.0.1:19090/metrics 2>/dev/null \
+     | grep -q '^prometheus_config_last_reload_successful 1'; then
+  echo "Prometheus config reloaded"
+else
+  echo "::error::Prometheus config reload failed - 옛 설정으로 계속 동작 중입니다"
+  docker logs --tail=50 gamehouse-prometheus || true
+  exit 1
+fi
+
+echo "[9/9] Checking observability container health..."
 
 for container in "${OBSERVE_CONTAINERS[@]}"; do
   if ! wait_for_health "${container}"; then
