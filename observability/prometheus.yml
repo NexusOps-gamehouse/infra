@@ -37,10 +37,14 @@ scrape_configs:
   # 호스트 층 — EC2 자체의 디스크 / 메모리 / 로드
   # 컨테이너는 멀쩡한데 호스트 디스크가 100% 라서 죽는 장애는 여기서만 보인다.
   #
-  # job_name 은 '수집 상태' 패널에 그대로 표시된다. node 만으로는 무엇을 보는지
-  # 알기 어려워 컨테이너 이름과 같은 node-exporter 로 맞췄다.
+  # job_name 은 '무엇을 관측하는가'로 짓는다(Prometheus 관례). node-exporter 가 아니라
+  # node 인 이유가 그것이다. postgres 도 같은 규칙이다.
+  #
+  # ⚠️ job_name 을 바꾸면 라벨이 바뀌므로 그 순간부터 '다른 시계열'이 된다.
+  #    같은 패널에 옛 선과 새 선이 둘 다 그려져 값이 두 개씩 보인다.
+  #    화면 표시만 바꾸고 싶다면 Grafana 쪽 value mapping 을 쓸 것.
   # ---------------------------------------------------------------------
-  - job_name: node-exporter
+  - job_name: node
     static_configs:
       - targets: ["node-exporter:9100"]
 
