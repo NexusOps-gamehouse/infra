@@ -94,6 +94,44 @@ wait_for_actuator() {
   return 1
 }
 
+reload_prometheus() {
+  local metrics="" before="" after="" ok=""
+
+  # 주의: curl ... | grep -q 로 쓰면 안 된다.
+  # grep -q 는 첫 매치에서 즉시 끝나 파이프를 닫고, 아직 쓰고 있던 curl 이
+  # exit 23(write error)으로 죽는다. 맨 위의 pipefail 이 그걸 파이프라인 실패로
+  # 판정하므로 "리로드는 성공했는데 배포는 실패"가 된다.
+  # 그래서 wait_for_actuator 와 같이 변수에 먼저 받아둔 뒤 검사한다.
+  metrics="$(curl -fsS --max-time 5 http://127.0.0.1:19090/metrics 2>/dev/null || true)"
+  before="$(awk '/^prometheus_config_last_reload_success_timestamp_seconds /{print $2}' <<< "${metrics}")"
+
+  docker kill -s HUP gamehouse-prometheus >/dev/null
+
+  for _ in $(seq 1 10); do
+    sleep 2
+
+    metrics="$(curl -fsS --max-time 5 http://127.0.0.1:19090/metrics 2>/dev/null || true)"
+    ok="$(awk '/^prometheus_config_last_reload_successful /{print $2}' <<< "${metrics}")"
+    after="$(awk '/^prometheus_config_last_reload_success_timestamp_seconds /{print $2}' <<< "${metrics}")"
+
+    # 설정이 깨졌으면 0 으로 떨어진다. 이때 Prometheus 는 옛 설정을 유지한 채
+    # 로그에만 남기고 계속 돈다. 조용한 실패라 여기서 잡아야 한다.
+    if [[ "${ok}" == "0" ]]; then
+      echo "Prometheus rejected the new config"
+      return 1
+    fi
+
+    # successful 은 기동 직후에도 1 이므로 그것만 봐서는 이번 SIGHUP 이 반영됐는지
+    # 알 수 없다. 성공 타임스탬프가 앞으로 갔는지로 판정한다.
+    if [[ -n "${after}" && "${after}" != "${before}" ]]; then
+      return 0
+    fi
+  done
+
+  echo "Prometheus reload confirmation timed out"
+  return 1
+}
+
 echo "========================================"
 echo "GameHouse deployment started"
 echo "========================================"
@@ -186,12 +224,7 @@ docker compose -f "${OBSERVE_FILE}" up -d --remove-orphans
 # ---------------------------------------------------------------------------
 echo "[8/9] Reloading Prometheus config..."
 
-docker kill -s HUP gamehouse-prometheus >/dev/null
-
-sleep 3
-
-if curl -fsS --max-time 5 http://127.0.0.1:19090/metrics 2>/dev/null \
-     | grep -q '^prometheus_config_last_reload_successful 1'; then
+if reload_prometheus; then
   echo "Prometheus config reloaded"
 else
   echo "::error::Prometheus config reload failed - 옛 설정으로 계속 동작 중입니다"
