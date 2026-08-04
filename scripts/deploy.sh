@@ -25,6 +25,7 @@ OBSERVE_CONTAINERS=(
   "gamehouse-node-exporter"
   "gamehouse-prometheus"
   "gamehouse-grafana"
+  "gamehouse-postgres-exporter"
 )
 
 wait_for_health() {

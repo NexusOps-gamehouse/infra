@@ -94,6 +94,39 @@ services:
     restart: unless-stopped
     networks: [observe-net]
 
+  # DB 층. RDS 안에서 본 상태를 수집한다.
+  #
+  # HikariCP 패널이 '앱에서 본' 시야라면 이쪽은 'DB에서 본' 시야다.
+  # 둘을 겹쳐야 커넥션이 밀릴 때 풀이 작은 건지 DB 가 한계인지 갈린다.
+  #   대기 높음 + DB 연결 수 낮음 → 풀이 작다
+  #   대기 높음 + DB 연결 수 최대 → DB 가 한계
+  #
+  # DB 가 RDS 로 빠지면서 cAdvisor 로 보이던 gamehouse-db 컨테이너가 사라졌다.
+  # 그 빈자리를 메우는 것이 이 exporter 다.
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: gamehouse-postgres-exporter
+    environment:
+      # URI / USER / PASS 를 나눠 준다.
+      # 하나의 접속 문자열(DATA_SOURCE_NAME)로 합치면 비밀번호에 @ # / 같은 문자가
+      # 섞였을 때 URL 인코딩이 필요해지고, 안 하면 조용히 접속 실패한다.
+      #
+      # 주소는 앱과 같은 RDS 를 그대로 재사용한다(DB_HOST/DB_PORT/DB_NAME).
+      # sslmode=require 는 RDS 가 SSL 접속을 강제하므로 반드시 필요하다.
+      DATA_SOURCE_URI: "${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require"
+      # 앱 계정이 아니라 읽기 전용 계정을 쓴다. pg_monitor 권한만 있으면 되고,
+      # 이 계정으로는 테이블 데이터를 볼 수 없다(.env.example 의 생성 SQL 참고).
+      DATA_SOURCE_USER: ${PG_EXPORTER_USERNAME:-exporter}
+      DATA_SOURCE_PASS: ${PG_EXPORTER_PASSWORD:?PG_EXPORTER_PASSWORD is required}
+    ports:
+      # ⚠️ 인증이 없다. Prometheus / cAdvisor 와 같은 취급으로,
+      #    127.0.0.1 에만 묶고 절대 외부에 열지 않는다.
+      - "127.0.0.1:19187:9187"
+    restart: unless-stopped
+    # RDS 는 도커 네트워크 밖이라 호스트를 거쳐 나간다.
+    # Prometheus 가 긁어갈 수 있도록 observe-net 에만 붙이면 된다.
+    networks: [observe-net]
+
 networks:
   observe-net:
     driver: bridge

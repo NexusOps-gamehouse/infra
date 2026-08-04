@@ -518,7 +518,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 28
+        "y": 36
       },
       "id": 10,
       "fieldConfig": {
@@ -628,7 +628,7 @@
     {
       "type": "timeseries",
       "title": "호스트 메모리 여유 / CPU 포화도",
-      "description": "호스트(EC2 또는 Docker Desktop VM) 전체 상태. 컨테이너 메모리가 여유로워도\n호스트가 말라 있으면 곧 OOM 으로 컨테이너가 강제 종료된다.\n\nCPU 포화도 % (오른쪽 축, 점선) — load average 를 코어 수로 나눠 % 로 바꾼 값이다.\n원래 load1 은 '최근 1분간 CPU 를 쓰려고 줄 서 있던 프로세스 수'인데,\n숫자만 보면 높은지 낮은지 알 수 없다. 코어가 4개인 서버의 load 2 는 절반만 쓰는\n여유로운 상태지만, 코어가 1개면 200% 과부하이기 때문이다.\n그래서 코어 수로 나눠 정규화했다.\n\n  ~70%   여유\n  100%   코어를 꽉 채운 상태\n  100%+  처리 못한 작업이 줄 서 있음 = 응답이 느려지기 시작",
+      "description": "호스트(EC2 또는 Docker Desktop VM) 전체 상태. 컨테이너 메모리가 여유로워도\n호스트가 말라 있으면 곧 OOM 으로 컨테이너가 강제 종료된다.\n\nCPU 포화도 % (오른쪽 축, 점선) — load average 를 코어 수로 나눠 % 로 바꾼 값이다.\n원래 load1 은 '최근 1분간 CPU 를 쓰려고 줄 서 있던 프로세스 수'인데,\n숫자만 보면 높은지 낮은지 알 수 없다. 코어가 4개인 서버의 load 2 는 절반만 쓰는\n여유로운 상태지만, 코어가 1개면 200% 과부하이기 때문이다.\n그래서 코어 수로 나눠 정규화했다.\n\n  ~70%   여유\n  100%   코어를 꽉 채운 상태\n  100%+  처리 못한 작업이 줄 서 있음 = 응답이 느려지기 시작\n\n──────────────────────────────────────────────────────────────────────\n[2026-08 수정] CPU 포화도 선이 그려지지 않던 문제\n\n  이전 쿼리:  100 * node_load1 / count(node_cpu_seconds_total{mode=\"idle\"})\n\n  PromQL 은 벡터끼리 나눌 때 양쪽 라벨이 일치해야 짝을 짓는다.\n    node_load1        → {instance=\"...\", job=\"node\"}\n    count(...) 결과   → 라벨 없음 (by 없이 집계하면 라벨이 전부 사라진다)\n  짝이 안 맞아 결과가 빈 벡터가 되고, 에러도 없이 선만 사라진다.\n\n  scalar() 로 감싸면 벡터가 숫자 하나가 되어 라벨 매칭을 건너뛴다.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -637,7 +637,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 28
+        "y": 36
       },
       "id": 11,
       "fieldConfig": {
@@ -722,7 +722,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "100 * node_load1 / count(node_cpu_seconds_total{mode=\"idle\"})",
+          "expr": "100 * node_load1 / scalar(count(node_cpu_seconds_total{mode=\"idle\"}))",
           "legendFormat": "CPU 포화도"
         }
       ]
@@ -882,7 +882,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 36
+        "y": 44
       },
       "id": 14,
       "fieldConfig": {
@@ -1080,6 +1080,303 @@
           "legendFormat": "최대 (풀 크기)"
         }
       ]
+    },
+    {
+      "type": "timeseries",
+      "id": 20,
+      "title": "DB 연결 수 (RDS 에서 본 시야)",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 28
+      },
+      "description": "RDS 에 실제로 붙어 있는 연결 수다. 옆의 'DB 커넥션 풀' 패널이 앱에서 본 시야라면\n이쪽은 DB 에서 본 시야이고, 둘을 대조해야 원인이 갈린다.\n\n  Hikari 대기 중 높음 + 여기 연결 수 낮음  → 풀이 작다 (maximum-pool-size 확대)\n  Hikari 대기 중 높음 + 여기 연결 수 최대  → DB 가 한계 (쿼리 튜닝 / 인스턴스 확대)\n\n이 구분이 없으면 엉뚱한 곳을 고친다. 풀만 늘리면 될 일에 RDS 인스턴스를 키우거나,\n반대로 DB 가 한계인데 풀을 늘려 상황을 악화시킨다.\n\n우리 앱만 세는 것이 아니다. 누군가 DBeaver 로 붙어 있거나 배치가 돌고 있으면 그것도 잡힌다.\n'앱은 10개 쓰는데 왜 90개가 붙어 있지?' 를 여기서 발견한다.\n\nmax_connections 는 RDS 파라미터 그룹 값이고 인스턴스 크기에 따라 자동으로 정해진다.\n작은 인스턴스일수록 적으므로, 풀 크기를 늘릴 때는 반드시 이 선을 먼저 확인한다.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "최대 (max_connections)"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "pg_stat_database_numbackends{datname=\"duo\"}",
+          "legendFormat": "duo 연결 수"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "pg_settings_max_connections",
+          "legendFormat": "최대 (max_connections)"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 21,
+      "title": "DB 캐시 히트율",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 28
+      },
+      "description": "PostgreSQL 이 자주 쓰는 데이터를 메모리에 들고 있는 비율이다.\n\n  blks_hit   메모리에서 찾음 (나노초)\n  blks_read  디스크까지 감  (밀리초)   ← 1000배 차이\n\n읽는 법\n  99% 근처  정상\n  95% 아래  주의\n  90% 아래  디스크를 자주 때리는 중\n\n원인은 보통 둘이다\n  1) 데이터가 늘어 메모리에 안 들어감      → RDS 인스턴스 확대\n  2) 인덱스가 없어 테이블 전체를 훑는 중   → 쿼리 튜닝   ← 훨씬 흔하다\n\n2번이 무서운 건 회원이 10명일 때는 멀쩡하다가 10만 명이 되는 순간 무너진다는 점이다.\n그 변곡점이 이 그래프에 남는다.\n\n※ 트래픽이 아예 없으면 분모가 0 이라 계산이 안 되고 선이 끊긴다. 정상이다.\n  그래서 창을 15분으로 넓게 잡았다.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "max": 100,
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "100 * rate(pg_stat_database_blks_hit{datname=\"duo\"}[15m]) / (rate(pg_stat_database_blks_hit{datname=\"duo\"}[15m]) + rate(pg_stat_database_blks_read{datname=\"duo\"}[15m]))",
+          "legendFormat": "캐시 히트율"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 22,
+      "title": "롤백 비율 / 데드락",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 28
+      },
+      "description": "트랜잭션이 성공하면 commit, 실패해 되돌리면 rollback 이다.\n롤백이 평소보다 튀면 앱에서 예외가 터지고 있다는 뜻이다.\n\n'에러 발생 건수' 패널과 함께 보면 원인이 좁혀진다\n  5xx 오름 + 롤백 오름   → DB 작업에서 예외 발생\n  5xx 오름 + 롤백 평소   → DB 밖에서 터짐 (외부 API 실패 등)\n\n데드락은 오른쪽 축이다. 평소 0 이어야 하고 1 이라도 나오면 코드 문제다.\n두 트랜잭션이 서로가 쥔 잠금을 기다리며 맞물린 상태로, PostgreSQL 이 한쪽을\n강제로 죽여서 푼다. 죽은 쪽 요청은 실패한다.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "decimals": 2
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "데드락 (right y-axis)"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "100 * rate(pg_stat_database_xact_rollback{datname=\"duo\"}[5m]) / (rate(pg_stat_database_xact_commit{datname=\"duo\"}[5m]) + rate(pg_stat_database_xact_rollback{datname=\"duo\"}[5m]))",
+          "legendFormat": "롤백 비율"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "increase(pg_stat_database_deadlocks{datname=\"duo\"}[5m])",
+          "legendFormat": "데드락 (right y-axis)"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 23,
+      "title": "가장 오래 도는 트랜잭션",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 28
+      },
+      "description": "지금 몇 초째 안 끝난 트랜잭션이 있는지다. 슬로우 쿼리의 조기 경보다.\n\n이 값이 뛰면 그 쿼리가 커넥션을 붙잡고 있고, 곧 'DB 커넥션 풀' 패널의 대기가 오른다.\n인과 순서가 이렇게 보인다\n\n  여기가 급등  →  Hikari 대기 중 상승  →  응답시간 p95 상승  →  '사이트 느려요'\n    (원인)                                                        (증상)\n\n이 패널이 없으면 마지막 단계만 보여서 '느린데 이유를 모르겠다'로 끝난다.\n\n읽는 법\n  ~1초    정상\n  5초+    주의. 어떤 쿼리인지 확인이 필요하다\n  30초+   커넥션을 오래 붙잡는 중. 곧 전체가 밀린다\n\n어떤 쿼리인지까지는 여기서 알 수 없다. RDS Performance Insights(7일 보관 무료)로\nSQL 단위까지 내려가 확인한다.\n\n⚠️ postgres_exporter 버전에 따라 이 지표가 기본 수집에 없을 수 있다.\n  선이 아예 안 나오면 확인할 것\n    curl -s localhost:19187/metrics | grep max_tx_duration",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "pg_stat_activity_max_tx_duration{datname=\"duo\"}",
+          "legendFormat": "최장 트랜잭션"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ],
   "refresh": "30s",
