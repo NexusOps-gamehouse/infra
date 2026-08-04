@@ -1,27 +1,8 @@
 name: gamehouse
 
 services:
-  db:
-    image: postgres:16-alpine
-    container_name: gamehouse-db
-    environment:
-      POSTGRES_DB: ${DB_NAME:-duo}
-      POSTGRES_USER: ${DB_USERNAME:-duo}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-    ports:
-      - "5432:5432"
-    volumes:
-      - duo-db-data:/var/lib/postgresql/data
-    networks:
-      - backend-net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
   # 채팅 메시지 전달을 위한 외부 STOMP 브로커.
-  # db 와 마찬가지로 backend 만 접근하는 내부 인프라이므로 backend-net 에만 연결한다.
+  # backend 만 접근하는 내부 인프라이므로 backend-net 에만 연결한다.
   rabbitmq:
     build: ../infra/rabbitmq        # STOMP 플러그인을 켠 커스텀 이미지
     container_name: gamehouse-rabbitmq
@@ -59,8 +40,6 @@ services:
     # 한계가 없으면 OOM killer 가 "가장 큰 프로세스" = 이 JVM 을 골라 죽인다.
     mem_limit: 700m
     depends_on:
-      db:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     environment:
@@ -88,7 +67,7 @@ services:
       # 안정된 값을 확인한 뒤에 정하는 것이 맞다.
       JAVA_TOOL_OPTIONS: "-Xmx200m -Xss512k -XX:MaxDirectMemorySize=64m"
       # ----------------------------------------------------------------------
-      DB_URL: jdbc:postgresql://db:5432/${DB_NAME:-duo}
+      DB_URL: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
       DB_USERNAME: ${DB_USERNAME:-duo}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
@@ -107,8 +86,8 @@ services:
       - frontend-net
       - backend-net
     ports:
-      - "8080:8080" 
-      - "127.0.0.1:8081:8081"  # 로컬 디버깅용
+      - "8080:8080"
+      - "127.0.0.1:8081:8081"
     healthcheck:
       # 런타임 이미지에 curl 없음 → bash 로 포트 TCP 체크
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
@@ -148,7 +127,7 @@ services:
       retries: 3
       start_period: 5s
 
-# frontend-net: frontend↔backend / backend-net: backend↔db,rabbitmq (내부 인프라 격리)
+# frontend-net: frontend↔backend / backend-net: backend↔rabbitmq (내부 인프라 격리)
 networks:
   frontend-net:
     driver: bridge
@@ -156,6 +135,5 @@ networks:
     driver: bridge
 
 volumes:
-  duo-db-data:
   backend-uploads:
   rabbitmq-data:
