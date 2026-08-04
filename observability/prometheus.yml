@@ -69,3 +69,26 @@ scrape_configs:
   - job_name: rabbitmq
     static_configs:
       - targets: ["gamehouse-rabbitmq:15692"]
+
+  # ---------------------------------------------------------------------
+  # DB 층 — RDS 안에서 본 상태
+  #   pg_stat_database_numbackends  : DB 에 실제로 붙어 있는 연결 수
+  #                                   (HikariCP 지표와 대조해 원인을 가른다)
+  #   blks_hit / blks_read          : 캐시 히트율. 인덱스가 빠지면 여기가 먼저 무너진다
+  #   xact_commit / xact_rollback   : 롤백 급증 = 앱에서 예외가 터지는 중
+  #   pg_stat_activity_max_tx_duration : 지금 몇 초째 안 끝난 쿼리가 있나 (슬로우 쿼리 조기 경보)
+  #
+  # DB 가 RDS 로 빠지면서 cAdvisor 가 보던 gamehouse-db 컨테이너가 사라졌다.
+  # 이 job 이 그 빈자리를 메운다. 다만 여기서 보이는 건 'DB 프로세스 안'이고,
+  # RDS 서버 자체의 디스크·CPU·버스트 크레딧은 CloudWatch 에서만 볼 수 있다.
+  # ---------------------------------------------------------------------
+  - job_name: postgres
+    static_configs:
+      - targets: ["gamehouse-postgres-exporter:9187"]
+    # postgres_exporter 는 테이블·인덱스 단위로도 지표를 쏟아낸다.
+    # retention 이 2GB 뿐이므로 cAdvisor 와 같은 이유로 실제 쓰는 것만 남긴다.
+    # 새 패널을 만들면서 "메트릭이 없다"면 이 목록에 빠져 있는지 먼저 확인할 것.
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'pg_up|pg_settings_max_connections|pg_stat_database_(numbackends|blks_hit|blks_read|xact_commit|xact_rollback|deadlocks)|pg_stat_activity_max_tx_duration|pg_database_size_bytes'
+        action: keep
