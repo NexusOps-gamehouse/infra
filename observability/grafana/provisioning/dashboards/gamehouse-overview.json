@@ -443,7 +443,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 20
       },
@@ -737,8 +737,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 20
       },
       "id": 9,
@@ -873,14 +873,14 @@
     {
       "type": "timeseries",
       "title": "네트워크 사용량 (컨테이너별, 대역폭 대비 %)",
-      "description": "각 컨테이너가 초당 주고받은 데이터(수신 + 송신)를, t3.small 이 지속 유지할 수 있는\n대역폭(약 16 MB/s)에 대한 비율로 환산했다.\n\n왜 % 인가 — '250 KB/s' 는 그 자체로 판단이 안 되는 숫자다. 한도가 16 MB/s 인지\n1 GB/s 인지 모르면 여유인지 위험인지 알 수 없다. 비율로 보면 바로 읽힌다.\n(디스크 패널을 사용률 % 로 둔 것과 같은 이유)\n\n위험 기준 (컨테이너 하나 기준)\n  ~25%    여유. 평소 우리 규모에서는 1% 도 안 나온다\n  25~50%  한 컨테이너가 서버 대역폭의 1/4 이상을 혼자 쓰는 중. 원인을 확인한다\n  50%+    위험. 옆 '호스트 대역폭 사용률' 패널도 함께 오르고 있을 것이다\n\n  ※ 모든 선의 합이 100% 에 가까우면 대역폭이 곧 병목이 된다.\n\n튀는 컨테이너로 원인을 좁힌다\n  backend   /uploads/** 이미지 서빙일 가능성이 크다.\n            '요청 수는 그대로인데 서버가 느리다'의 원인이 여기서 잡힌다\n  db        쿼리가 필요 이상으로 많은 행을 실어 나르는 중. N+1 이나 전체 조회 의심\n  rabbitmq  채팅량 증가. 옆 채팅 패널과 함께 본다\n\n⚠️ 이 패널은 컨테이너 간 내부 통신(backend ↔ db 등)도 포함한다. 그 트래픽은\n   호스트 NIC 을 거치지 않으므로, 여기 선들의 합이 옆 '호스트 대역폭 사용률' 보다\n   클 수 있다. 둘은 각각 '누가 쓰나'와 '실제로 밖으로 얼마나 나갔나'를 답한다.\n\n수신/송신을 더해 하나로 그린다. 방향까지 나누면 선이 16개가 되어 오히려 안 보인다.\n방향이 필요하면 Explore 에서:\n  sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n\n실제 바이트 값이 필요하면:\n  sum by (name) (rate(container_network_receive_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n  + sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n\n16 MB/s 는 t3.small 의 대략적인 baseline 이다. 인스턴스 타입을 바꾸면 이 분모도\n함께 바꿔야 한다(쿼리의 16000000).",
+      "description": "각 컨테이너가 초당 주고받은 데이터(수신 + 송신)를, t3.small 이 지속 유지할 수 있는\n대역폭(약 16 MB/s)에 대한 비율로 환산했다.\n\n왜 % 인가 — '250 KB/s' 는 그 자체로 판단이 안 되는 숫자다. 한도가 16 MB/s 인지\n1 GB/s 인지 모르면 여유인지 위험인지 알 수 없다. 비율로 보면 바로 읽힌다.\n(디스크 패널을 사용률 % 로 둔 것과 같은 이유)\n\n위험 기준 (컨테이너 하나 기준)\n  ~25%    여유. 평소 우리 규모에서는 1% 도 안 나온다\n  25~50%  한 컨테이너가 서버 대역폭의 1/4 이상을 혼자 쓰는 중. 원인을 확인한다\n  50%+    위험\n\n  ※ 모든 선의 합이 100% 에 가까우면 대역폭이 곧 병목이 된다.\n\n튀는 컨테이너로 원인을 좁힌다\n  backend   /uploads/** 이미지 서빙이거나, RDS 와 주고받는 쿼리 결과다.\n            DB 가 RDS 로 빠지면서 DB 트래픽도 backend 선에 합쳐졌다.\n            '요청 수는 그대로인데 서버가 느리다'의 원인이 여기서 잡힌다\n  rabbitmq  채팅량 증가. 옆 채팅 패널과 함께 본다\n  frontend  정적 파일 서빙\n\n⚠️ t3 계열은 네트워크도 크레딧 방식이다. CPU 처럼 순간적으로는 훨씬 빠르지만,\n   지속 사용량이 baseline 을 넘으면 크레딧이 소진되고 속도가 baseline 으로 고정된다.\n   이때 증상이 'CPU 도 메모리도 멀쩡한데 갑자기 전체가 느려짐' 이다.\n   다른 패널이 전부 정상인데 서비스가 느리면 이 선들의 합을 확인할 것.\n   (호스트 NIC 기준 패널은 제거했다. 컨테이너 합계로 대신 판단한다)\n\n수신/송신을 더해 하나로 그린다. 방향까지 나누면 선이 배로 늘어 오히려 안 보인다.\n방향이 필요하면 Explore 에서:\n  sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n\n실제 바이트 값이 필요하면:\n  sum by (name) (rate(container_network_receive_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n  + sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n\n16 MB/s 는 t3.small 의 대략적인 baseline 이다. 인스턴스 타입을 바꾸면 이 분모도\n함께 바꿔야 한다(쿼리의 16000000).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 24,
         "x": 0,
         "y": 36
       },
@@ -948,83 +948,80 @@
     },
     {
       "type": "timeseries",
-      "title": "호스트 대역폭 사용률 (t3.small)",
-      "description": "EC2 실제 NIC(ens5)를 오간 총 트래픽을, t3.small 이 지속 유지할 수 있는\n대역폭(약 16 MB/s)에 대한 비율로 환산한 값이다.\n\n왜 % 인가 — '3 MB/s' 는 판단이 안 되는 숫자다. 한도가 16 MB/s 인지 1 GB/s 인지에\n따라 여유일 수도 위험일 수도 있다. 비율로 보면 그 자체로 판단이 된다.\n(디스크 패널을 사용률 % 로 둔 것과 같은 이유)\n\n⚠️ t3 계열은 네트워크도 크레딧 방식이다. CPU 처럼 순간적으로는 훨씬 빠르지만,\n   지속 사용량이 baseline 을 넘으면 크레딧이 소진되고 속도가 baseline 으로 고정된다.\n   이때 나타나는 증상이 'CPU 도 메모리도 멀쩡한데 갑자기 전체가 느려짐' 이다.\n   다른 패널이 전부 정상인데 서비스가 느리면 이 선을 확인할 것.\n\n읽는 법\n  ~50%   여유\n  50~80% 주의. 지속되면 크레딧이 줄어든다\n  80%+   포화 임박. 이미지·정적 파일을 S3/CloudFront 로 빼는 것을 검토\n\n16 MB/s 는 t3.small 의 대략적인 baseline 이다. 정확한 값은 인스턴스 타입과\n리전에 따라 다르므로 참고 기준으로 쓴다.",
+      "title": "DB 커넥션 풀 (backend → RDS)",
+      "description": "DB 연결을 새로 만드는 일은 비싸다. 요청마다 새로 맺으면 느리므로 미리 몇 개 만들어\n두고 돌려쓴다. 이것이 커넥션 풀이다. Spring Boot 는 HikariCP 를 쓰고 기본 크기는 10.\n\n식당 좌석으로 생각하면 쉽다. 좌석이 10개인데 손님이 15명 오면 5명은 문 앞에서 기다린다.\n\n  최대 (풀 크기)  좌석 총 개수\n  사용 중         지금 쿼리를 실행하고 있는 연결\n  유휴            비어 있는 좌석\n  대기 중         ⭐ 좌석을 못 얻어 멈춰 선 스레드 수\n\n'대기 중'이 이 패널의 핵심이다. 0 이어야 정상이고, 1 이상이면 요청이 DB 연결을\n기다리느라 멈춰 있다는 뜻이다.\n\n이때 증상이 아주 특이하다\n  backend CPU    한가함\n  backend 메모리  정상\n  응답시간 p95    치솟음   ← 아무 데도 안 바쁜데 느리다\n다들 그냥 기다리고 있기 때문이다. 이 패널이 없으면 '원인 불명'으로 끝난다.\n\n왜 이런 일이 생기나 — 느린 쿼리 하나가 좌석을 오래 붙잡으면 도미노가 된다.\n  느린 쿼리(3초) 실행 → 좌석 10개가 다 참 → 다음 요청들이 줄을 섬(대기 상승)\n  → 그 요청들의 응답시간도 3초씩 늘어남 → 사용자는 '사이트 전체가 느리다'고 느낌\n범인은 쿼리 하나인데 증상은 전체 장애다.\n\n⚠️ RDS 전환으로 이 패널의 중요도가 올라갔다. DB 가 같은 호스트 안이 아니라\n   네트워크 건너편에 있으므로, 연결을 새로 맺는 비용과 쿼리 왕복 시간이 전보다 크다.\n   즉 좌석이 붙잡혀 있는 시간이 길어져 '대기 중'이 더 쉽게 생긴다.\n\n대기가 계속 잡히면\n  1) 느린 쿼리를 먼저 찾는다 (응답시간 p95 패널에서 어느 엔드포인트인지 좁힌다)\n  2) 그래도 부족하면 spring.datasource.hikari.maximum-pool-size 를 늘린다\n     단, RDS 의 max_connections 를 넘기면 안 된다. RDS 는 인스턴스 메모리에 따라\n     이 값이 자동으로 정해진다 (db.t3.micro 는 90 안팎)\n\n※ 이 패널은 '앱에서 본' 시야다. postgres_exporter 를 붙이면 'DB 에서 본' 연결 수와\n  비교할 수 있고, 그때 비로소 풀이 작은 건지 DB 가 한계인지 갈린다.\n\n  대기 높음 + DB 연결 수 낮음  → 풀이 작다 (풀 확대)\n  대기 높음 + DB 연결 수 최대  → DB 가 한계 (쿼리 튜닝 / 인스턴스 확대)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 36
+        "w": 8,
+        "x": 16,
+        "y": 20
       },
-      "id": 15,
+      "id": 16,
       "fieldConfig": {
         "defaults": {
-          "unit": "percent",
+          "unit": "short",
           "min": 0,
-          "max": 100,
           "decimals": 1,
           "custom": {
             "lineWidth": 2,
-            "fillOpacity": 15,
-            "showPoints": "never",
-            "thresholdsStyle": {
-              "mode": "line"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 50
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
+            "fillOpacity": 10,
+            "showPoints": "never"
           }
         },
         "overrides": [
           {
             "matcher": {
               "id": "byName",
-              "options": "실제 처리량"
+              "options": "최대 (풀 크기)"
             },
             "properties": [
               {
-                "id": "unit",
-                "value": "Bps"
-              },
-              {
-                "id": "max",
-                "value": null
-              },
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
               },
               {
                 "id": "custom.fillOpacity",
                 "value": 0
               },
               {
-                "id": "custom.lineStyle",
+                "id": "color",
                 "value": {
-                  "fill": "dash",
-                  "dash": [
-                    8,
-                    6
-                  ]
+                  "mode": "fixed",
+                  "fixedColor": "text"
                 }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "대기 중"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 25
               }
             ]
           }
@@ -1052,8 +1049,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "100 * (sum(rate(node_network_receive_bytes_total{device=~\"ens5|eth0\"}[5m])) + sum(rate(node_network_transmit_bytes_total{device=~\"ens5|eth0\"}[5m]))) / 16000000",
-          "legendFormat": "대역폭 사용률"
+          "expr": "hikaricp_connections_active{job=\"backend\"}",
+          "legendFormat": "사용 중"
         },
         {
           "refId": "B",
@@ -1061,8 +1058,26 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(node_network_receive_bytes_total{device=~\"ens5|eth0\"}[5m])) + sum(rate(node_network_transmit_bytes_total{device=~\"ens5|eth0\"}[5m]))",
-          "legendFormat": "실제 처리량"
+          "expr": "hikaricp_connections_idle{job=\"backend\"}",
+          "legendFormat": "유휴"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "hikaricp_connections_pending{job=\"backend\"}",
+          "legendFormat": "대기 중"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "hikaricp_connections_max{job=\"backend\"}",
+          "legendFormat": "최대 (풀 크기)"
         }
       ]
     }
