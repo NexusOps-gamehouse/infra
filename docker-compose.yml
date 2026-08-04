@@ -138,6 +138,7 @@ services:
     networks:
       - frontend-net
     ports:
+      - "80:5173"
       - "5173:5173"
     healthcheck:
       # localhost 는 컨테이너 내부에서 IPv6(::1)로 풀릴 수 있어 서버(IPv4)와 안 붙음 → 127.0.0.1
