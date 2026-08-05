@@ -443,7 +443,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 12,
         "x": 0,
         "y": 22
       },
@@ -508,227 +508,6 @@
     },
     {
       "type": "timeseries",
-      "title": "호스트 디스크 사용률 / 여유",
-      "description": "EC2 루트 EBS 볼륨(mountpoint=\"/\")의 사용률. 왼쪽 축이 % (75% 주황 / 85% 빨강),\n오른쪽 축 점선이 남은 용량이다.\n\n⚠️ macOS 로컬에서는 No data 가 정상이다.\nDocker Desktop 은 컨테이너를 VM 안에서 돌려 호스트 루트가 \"/\" 가 아닌\n\"/host/root\" 로 잡히고, 그 값은 맥의 실제 디스크도 아니다.\nEC2 에서는 \"/\" 하나로 깔끔하게 나온다.\n\n왜 이 패널이 필요한가:\n호스트 디스크가 100% 가 되어도 컨테이너 CPU/메모리 지표는 전부 정상으로 보인다.\ncAdvisor 의 사각지대라 이 층이 없으면 원인을 영원히 못 찾는다.\n디스크가 차면 PostgreSQL 쓰기 실패, 컨테이너 기동 불가, Prometheus 수집 중단이\n한꺼번에 발생한다.\n\n읽는 법: 절대값보다 '기울기'를 본다. 일주일에 3% 씩 오르면 두 달 여유,\n어제부터 하루 5% 씩 오르면 뭔가 새로 쌓이기 시작한 것이다.\n미리 알면 EBS 를 무중단으로 늘릴 수 있다.\n\n용량 산정과 대응 절차 → observability/README.md",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 38
-      },
-      "id": 10,
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100,
-          "decimals": 1,
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "thresholdsStyle": {
-              "mode": "line"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 75
-              },
-              {
-                "color": "red",
-                "value": 85
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": ".*남은 용량.*"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "decbytes"
-              },
-              {
-                "id": "max",
-                "value": null
-              },
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "custom.fillOpacity",
-                "value": 0
-              },
-              {
-                "id": "custom.lineStyle",
-                "value": {
-                  "fill": "dash",
-                  "dash": [
-                    8,
-                    6
-                  ]
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull"
-          ],
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay|ramfs|devtmpfs\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay|ramfs|devtmpfs\"})",
-          "legendFormat": "사용률"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay|ramfs|devtmpfs\"}",
-          "legendFormat": "남은 용량"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "호스트 메모리 여유 / CPU 포화도",
-      "description": "호스트(EC2 또는 Docker Desktop VM) 전체 상태. 컨테이너 메모리가 여유로워도\n호스트가 말라 있으면 곧 OOM 으로 컨테이너가 강제 종료된다.\n\nCPU 포화도 % (오른쪽 축, 점선) — load average 를 코어 수로 나눠 % 로 바꾼 값이다.\n원래 load1 은 '최근 1분간 CPU 를 쓰려고 줄 서 있던 프로세스 수'인데,\n숫자만 보면 높은지 낮은지 알 수 없다. 코어가 4개인 서버의 load 2 는 절반만 쓰는\n여유로운 상태지만, 코어가 1개면 200% 과부하이기 때문이다.\n그래서 코어 수로 나눠 정규화했다.\n\n  ~70%   여유\n  100%   코어를 꽉 채운 상태\n  100%+  처리 못한 작업이 줄 서 있음 = 응답이 느려지기 시작\n\n──────────────────────────────────────────────────────────────────────\n[2026-08 수정] CPU 포화도 선이 그려지지 않던 문제\n\n  이전 쿼리:  100 * node_load1 / count(node_cpu_seconds_total{mode=\"idle\"})\n\n  PromQL 은 벡터끼리 나눌 때 양쪽 라벨이 일치해야 짝을 짓는다.\n    node_load1        → {instance=\"...\", job=\"node\"}\n    count(...) 결과   → 라벨 없음 (by 없이 집계하면 라벨이 전부 사라진다)\n  짝이 안 맞아 결과가 빈 벡터가 되고, 에러도 없이 선만 사라진다.\n\n  scalar() 로 감싸면 벡터가 숫자 하나가 되어 라벨 매칭을 건너뛴다.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 38
-      },
-      "id": 11,
-      "fieldConfig": {
-        "defaults": {
-          "unit": "decbytes",
-          "min": 0,
-          "decimals": 1,
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "CPU 포화도"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "percent"
-              },
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "custom.fillOpacity",
-                "value": 0
-              },
-              {
-                "id": "custom.lineStyle",
-                "value": {
-                  "fill": "dash",
-                  "dash": [
-                    8,
-                    6
-                  ]
-                }
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "orange"
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "min"
-          ],
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "node_memory_MemAvailable_bytes",
-          "legendFormat": "사용 가능 메모리"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "100 * node_load1 / scalar(count(node_cpu_seconds_total{mode=\"idle\"}))",
-          "legendFormat": "CPU 포화도"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
       "title": "Riot 호출 횟수 (2분 / 100회 한도)",
       "description": "개발용 API 키의 한도는 2분당 100회다. 최근 2분간 실제 호출 수를 응답 상태별로\n쌓아 올려, 전체 높이가 곧 총 호출 수가 되도록 했다. 빨간 점선이 한도(100)다.\n\n⚠️ 연동 1회에 API 를 4번 호출한다 (account → summoner → league → champion-mastery).\n   즉 2분에 25명만 연동해도 한도가 찬다. 생각보다 빡빡하다.\n\n읽는 법\n  전체 높이  최근 2분 총 호출 수. 점선(100)에 가까우면 곧 429 가 난다\n  200        정상 응답\n  429        레이트 리밋에 걸림. 이 조각이 보이면 이미 한도를 넘은 것\n  4xx        잘못된 요청 / 존재하지 않는 소환사 / 키 만료(403)\n  5xx        라이엇 서버 장애. 우리 잘못이 아니다\n\n  ~70    여유\n  70~100 주의. 시연이나 테스트를 몰아서 하면 곧 넘는다\n  100+   초과. 429 조각이 함께 나타난다\n\n한계\n  - 이 값은 '우리가 센 횟수'이지 라이엇이 센 값이 아니다. 정확히 하려면\n    응답 헤더 X-App-Rate-Limit-Count 를 읽어 Gauge 로 노출해야 한다(추후 과제).\n  - 또 하나의 한도인 '1초 20회'는 이 방식으로 볼 수 없다. 수집 주기가 30초라\n    1초 안의 순간 버스트가 평균으로 뭉개지기 때문이다.\n\n응답 지연이 궁금하면 Explore 에서:\n  histogram_quantile(0.95, sum by (le) (rate(http_client_requests_seconds_bucket{job=\"backend\"}[5m])))\n\n빈 화면이면 라이엇 호출이 없었던 것이다. 라벨 이름이 다를 수도 있으니\nExplore 에서 http_client_requests_seconds_count 를 조회해 client_name 값을 확인할 것.",
       "datasource": {
@@ -737,8 +516,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
+        "w": 12,
+        "x": 12,
         "y": 22
       },
       "id": 9,
@@ -872,82 +651,6 @@
     },
     {
       "type": "timeseries",
-      "title": "네트워크 사용량 (컨테이너별, 대역폭 대비 %)",
-      "description": "각 컨테이너가 초당 주고받은 데이터(수신 + 송신)를, t3.small 이 지속 유지할 수 있는\n대역폭(약 16 MB/s)에 대한 비율로 환산했다.\n\n왜 % 인가 — '250 KB/s' 는 그 자체로 판단이 안 되는 숫자다. 한도가 16 MB/s 인지\n1 GB/s 인지 모르면 여유인지 위험인지 알 수 없다. 비율로 보면 바로 읽힌다.\n(디스크 패널을 사용률 % 로 둔 것과 같은 이유)\n\n위험 기준 (컨테이너 하나 기준)\n  ~25%    여유. 평소 우리 규모에서는 1% 도 안 나온다\n  25~50%  한 컨테이너가 서버 대역폭의 1/4 이상을 혼자 쓰는 중. 원인을 확인한다\n  50%+    위험\n\n  ※ 모든 선의 합이 100% 에 가까우면 대역폭이 곧 병목이 된다.\n\n튀는 컨테이너로 원인을 좁힌다\n  backend   /uploads/** 이미지 서빙이거나, RDS 와 주고받는 쿼리 결과다.\n            DB 가 RDS 로 빠지면서 DB 트래픽도 backend 선에 합쳐졌다.\n            '요청 수는 그대로인데 서버가 느리다'의 원인이 여기서 잡힌다\n  rabbitmq  채팅량 증가. 옆 채팅 패널과 함께 본다\n  frontend  정적 파일 서빙\n\n⚠️ t3 계열은 네트워크도 크레딧 방식이다. CPU 처럼 순간적으로는 훨씬 빠르지만,\n   지속 사용량이 baseline 을 넘으면 크레딧이 소진되고 속도가 baseline 으로 고정된다.\n   이때 증상이 'CPU 도 메모리도 멀쩡한데 갑자기 전체가 느려짐' 이다.\n   다른 패널이 전부 정상인데 서비스가 느리면 이 선들의 합을 확인할 것.\n   (호스트 NIC 기준 패널은 제거했다. 컨테이너 합계로 대신 판단한다)\n\n수신/송신을 더해 하나로 그린다. 방향까지 나누면 선이 배로 늘어 오히려 안 보인다.\n방향이 필요하면 Explore 에서:\n  sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n\n실제 바이트 값이 필요하면:\n  sum by (name) (rate(container_network_receive_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n  + sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n\n16 MB/s 는 t3.small 의 대략적인 baseline 이다. 인스턴스 타입을 바꾸면 이 분모도\n함께 바꿔야 한다(쿼리의 16000000).",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 46
-      },
-      "id": 14,
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100,
-          "decimals": 2,
-          "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "thresholdsStyle": {
-              "mode": "line"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 25
-              },
-              {
-                "color": "red",
-                "value": 50
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "100 * (sum by (name) (rate(container_network_receive_bytes_total{name=~\"gamehouse-.*\"}[5m])) + sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))) / 16000000",
-          "legendFormat": "{{name}}"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
       "title": "DB 커넥션 풀 (backend → RDS)",
       "description": "DB 연결을 새로 만드는 일은 비싸다. 요청마다 새로 맺으면 느리므로 미리 몇 개 만들어\n두고 돌려쓴다. 이것이 커넥션 풀이다. Spring Boot 는 HikariCP 를 쓰고 기본 크기는 10.\n\n식당 좌석으로 생각하면 쉽다. 좌석이 10개인데 손님이 15명 오면 5명은 문 앞에서 기다린다.\n\n  최대 (풀 크기)  좌석 총 개수\n  사용 중         지금 쿼리를 실행하고 있는 연결\n  유휴            비어 있는 좌석\n  대기 중         ⭐ 좌석을 못 얻어 멈춰 선 스레드 수\n\n'대기 중'이 이 패널의 핵심이다. 0 이어야 정상이고, 1 이상이면 요청이 DB 연결을\n기다리느라 멈춰 있다는 뜻이다.\n\n이때 증상이 아주 특이하다\n  backend CPU    한가함\n  backend 메모리  정상\n  응답시간 p95    치솟음   ← 아무 데도 안 바쁜데 느리다\n다들 그냥 기다리고 있기 때문이다. 이 패널이 없으면 '원인 불명'으로 끝난다.\n\n왜 이런 일이 생기나 — 느린 쿼리 하나가 좌석을 오래 붙잡으면 도미노가 된다.\n  느린 쿼리(3초) 실행 → 좌석 10개가 다 참 → 다음 요청들이 줄을 섬(대기 상승)\n  → 그 요청들의 응답시간도 3초씩 늘어남 → 사용자는 '사이트 전체가 느리다'고 느낌\n범인은 쿼리 하나인데 증상은 전체 장애다.\n\n⚠️ RDS 전환으로 이 패널의 중요도가 올라갔다. DB 가 같은 호스트 안이 아니라\n   네트워크 건너편에 있으므로, 연결을 새로 맺는 비용과 쿼리 왕복 시간이 전보다 크다.\n   즉 좌석이 붙잡혀 있는 시간이 길어져 '대기 중'이 더 쉽게 생긴다.\n\n대기가 계속 잡히면\n  1) 느린 쿼리를 먼저 찾는다 (응답시간 p95 패널에서 어느 엔드포인트인지 좁힌다)\n  2) 그래도 부족하면 spring.datasource.hikari.maximum-pool-size 를 늘린다\n     단, RDS 의 max_connections 를 넘기면 안 된다. RDS 는 인스턴스 메모리에 따라\n     이 값이 자동으로 정해진다 (db.t3.micro 는 90 안팎)\n\n※ 이 패널은 '앱에서 본' 시야다. postgres_exporter 를 붙이면 'DB 에서 본' 연결 수와\n  비교할 수 있고, 그때 비로소 풀이 작은 건지 DB 가 한계인지 갈린다.\n\n  대기 높음 + DB 연결 수 낮음  → 풀이 작다 (풀 확대)\n  대기 높음 + DB 연결 수 최대  → DB 가 한계 (쿼리 튜닝 / 인스턴스 확대)",
       "datasource": {
@@ -956,9 +659,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 22
+        "w": 12,
+        "x": 0,
+        "y": 30
       },
       "id": 16,
       "fieldConfig": {
@@ -1087,8 +790,8 @@
       "title": "DB 연결 수 (RDS 에서 본 시야)",
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 0,
+        "w": 12,
+        "x": 12,
         "y": 30
       },
       "description": "RDS 에 실제로 붙어 있는 연결 수다. 옆의 'DB 커넥션 풀' 패널이 앱에서 본 시야라면\n이쪽은 DB 에서 본 시야이고, 둘을 대조해야 원인이 갈린다.\n\n  Hikari 대기 중 높음 + 여기 연결 수 낮음  → 풀이 작다 (maximum-pool-size 확대)\n  Hikari 대기 중 높음 + 여기 연결 수 최대  → DB 가 한계 (쿼리 튜닝 / 인스턴스 확대)\n\n이 구분이 없으면 엉뚱한 곳을 고친다. 풀만 늘리면 될 일에 RDS 인스턴스를 키우거나,\n반대로 DB 가 한계인데 풀을 늘려 상황을 악화시킨다.\n\n우리 앱만 세는 것이 아니다. 누군가 DBeaver 로 붙어 있거나 배치가 돌고 있으면 그것도 잡힌다.\n'앱은 10개 쓰는데 왜 90개가 붙어 있지?' 를 여기서 발견한다.\n\nmax_connections 는 RDS 파라미터 그룹 값이고 인스턴스 크기에 따라 자동으로 정해진다.\n작은 인스턴스일수록 적으므로, 풀 크기를 늘릴 때는 반드시 이 선을 먼저 확인한다.",
@@ -1176,189 +879,53 @@
     },
     {
       "type": "timeseries",
-      "id": 21,
-      "title": "DB 캐시 히트율",
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 6,
-        "y": 30
-      },
-      "description": "PostgreSQL 이 자주 쓰는 데이터를 메모리에 들고 있는 비율이다.\n\n  blks_hit   메모리에서 찾음 (나노초)\n  blks_read  디스크까지 감  (밀리초)   ← 1000배 차이\n\n읽는 법\n  99% 근처  정상\n  95% 아래  주의\n  90% 아래  디스크를 자주 때리는 중\n\n원인은 보통 둘이다\n  1) 데이터가 늘어 메모리에 안 들어감      → RDS 인스턴스 확대\n  2) 인덱스가 없어 테이블 전체를 훑는 중   → 쿼리 튜닝   ← 훨씬 흔하다\n\n2번이 무서운 건 회원이 10명일 때는 멀쩡하다가 10만 명이 되는 순간 무너진다는 점이다.\n그 변곡점이 이 그래프에 남는다.\n\n※ 트래픽이 아예 없으면 분모가 0 이라 계산이 안 되고 선이 끊긴다. 정상이다.\n  그래서 창을 15분으로 넓게 잡았다.",
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never"
-          },
-          "max": 100,
-          "decimals": 2
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "100 * rate(pg_stat_database_blks_hit{datname=\"duo\"}[15m]) / (rate(pg_stat_database_blks_hit{datname=\"duo\"}[15m]) + rate(pg_stat_database_blks_read{datname=\"duo\"}[15m]))",
-          "legendFormat": "캐시 히트율"
-        }
-      ],
+      "title": "호스트 디스크 사용률",
+      "description": "EC2 루트 EBS 볼륨(mountpoint=\"/\")의 사용률이다. (75% 주황 / 85% 빨강)\n\n예전에는 '남은 용량(GB)'을 오른쪽 축에 함께 그렸는데 지웠다.\n20GB 볼륨에서 49% 사용 = 10GB 남음 이므로 둘은 같은 정보의 다른 표현이고,\n축을 두 개 쓰면 Grafana 가 범례에 '(right y-axis)' 를 붙여 지저분해진다.\n남은 GB 가 필요하면 Explore 에서:\n  node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay|ramfs|devtmpfs\"}\n\n⚠️ macOS 로컬에서는 No data 가 정상이다.\nDocker Desktop 은 컨테이너를 VM 안에서 돌려 호스트 루트가 \"/\" 가 아닌\n\"/host/root\" 로 잡히고, 그 값은 맥의 실제 디스크도 아니다.\nEC2 에서는 \"/\" 하나로 깔끔하게 나온다.\n\n왜 이 패널이 필요한가:\n호스트 디스크가 100% 가 되어도 컨테이너 CPU/메모리 지표는 전부 정상으로 보인다.\ncAdvisor 의 사각지대라 이 층이 없으면 원인을 영원히 못 찾는다.\n디스크가 차면 PostgreSQL 쓰기 실패, 컨테이너 기동 불가, Prometheus 수집 중단이\n한꺼번에 발생한다.\n\n읽는 법: 절대값보다 '기울기'를 본다. 일주일에 3% 씩 오르면 두 달 여유,\n어제부터 하루 5% 씩 오르면 뭔가 새로 쌓이기 시작한 것이다.\n미리 알면 EBS 를 무중단으로 늘릴 수 있다.\n\n용량 산정과 대응 절차 → observability/README.md",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull"
-          ],
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "id": 22,
-      "title": "롤백 비율 / 데드락",
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 12,
-        "y": 30
+        "w": 8,
+        "x": 0,
+        "y": 38
       },
-      "description": "트랜잭션이 성공하면 commit, 실패해 되돌리면 rollback 이다.\n롤백이 평소보다 튀면 앱에서 예외가 터지고 있다는 뜻이다.\n\n'에러 발생 건수' 패널과 함께 보면 원인이 좁혀진다\n  5xx 오름 + 롤백 오름   → DB 작업에서 예외 발생\n  5xx 오름 + 롤백 평소   → DB 밖에서 터짐 (외부 API 실패 등)\n\n데드락은 오른쪽 축이다. 평소 0 이어야 하고 1 이라도 나오면 코드 문제다.\n두 트랜잭션이 서로가 쥔 잠금을 기다리며 맞물린 상태로, PostgreSQL 이 한쪽을\n강제로 죽여서 푼다. 죽은 쪽 요청은 실패한다.",
+      "id": 10,
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
           "min": 0,
+          "max": 100,
+          "decimals": 1,
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
-            "showPoints": "never"
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
           },
-          "decimals": 2
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "데드락 (right y-axis)"
-            },
-            "properties": [
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
               {
-                "id": "custom.axisPlacement",
-                "value": "right"
+                "color": "green",
+                "value": null
               },
               {
-                "id": "unit",
-                "value": "short"
+                "color": "orange",
+                "value": 75
               },
               {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "red"
-                }
-              },
-              {
-                "id": "custom.fillOpacity",
-                "value": 0
+                "color": "red",
+                "value": 85
               }
             ]
           }
-        ]
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "100 * rate(pg_stat_database_xact_rollback{datname=\"duo\"}[5m]) / (rate(pg_stat_database_xact_commit{datname=\"duo\"}[5m]) + rate(pg_stat_database_xact_rollback{datname=\"duo\"}[5m]))",
-          "legendFormat": "롤백 비율"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "increase(pg_stat_database_deadlocks{datname=\"duo\"}[5m])",
-          "legendFormat": "데드락 (right y-axis)"
-        }
-      ],
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull"
-          ],
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "id": 23,
-      "title": "가장 오래 도는 트랜잭션",
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 18,
-        "y": 30
-      },
-      "description": "지금 몇 초째 안 끝난 트랜잭션이 있는지다. 슬로우 쿼리의 조기 경보다.\n\n이 값이 뛰면 그 쿼리가 커넥션을 붙잡고 있고, 곧 'DB 커넥션 풀' 패널의 대기가 오른다.\n인과 순서가 이렇게 보인다\n\n  여기가 급등  →  Hikari 대기 중 상승  →  응답시간 p95 상승  →  '사이트 느려요'\n    (원인)                                                        (증상)\n\n이 패널이 없으면 마지막 단계만 보여서 '느린데 이유를 모르겠다'로 끝난다.\n\n읽는 법\n  ~1초    정상\n  5초+    주의. 어떤 쿼리인지 확인이 필요하다\n  30초+   커넥션을 오래 붙잡는 중. 곧 전체가 밀린다\n\n어떤 쿼리인지까지는 여기서 알 수 없다. RDS Performance Insights(7일 보관 무료)로\nSQL 단위까지 내려가 확인한다.\n\n⚠️ postgres_exporter 버전에 따라 이 지표가 기본 수집에 없을 수 있다.\n  선이 아예 안 나오면 확인할 것\n    curl -s localhost:19187/metrics | grep max_tx_duration\n\n※ 선이 여러 개인 이유 — postgres_exporter 는 연결 상태(state)별로 값을 나눠 준다.\n  active              쿼리를 실제로 실행 중\n  idle in transaction  ⭐ 트랜잭션을 열어둔 채 아무것도 안 하는 중\n  idle                 놀고 있는 연결\n\n  가장 위험한 것은 'idle in transaction' 이다. 쿼리는 안 하면서 잠금과 커넥션은\n  붙잡고 있어, 다른 요청을 막으면서 자원만 축낸다. 보통 애플리케이션이 트랜잭션을\n  닫지 않은 버그다. 이 선이 길게 유지되면 코드를 봐야 한다.",
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "min": 0,
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never"
-          },
-          "decimals": 1
         },
         "overrides": []
       },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "pg_stat_activity_max_tx_duration{datname=\"duo\"}",
-          "legendFormat": "{{state}}"
-        }
-      ],
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
       "options": {
         "legend": {
           "displayMode": "table",
@@ -1372,7 +939,204 @@
           "mode": "multi",
           "sort": "desc"
         }
-      }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay|ramfs|devtmpfs\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay|ramfs|devtmpfs\"})",
+          "legendFormat": "사용률"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "호스트 메모리 여유",
+      "description": "호스트(EC2) 전체의 사용 가능 메모리다. 컨테이너 메모리가 여유로워도\n호스트가 말라 있으면 곧 OOM 으로 컨테이너가 강제 종료된다.\n\nt3.small 은 2GB 다. 이 선이 300MB 아래로 내려가기 시작하면 위험 구간이다.\n\n옆의 'CPU 포화도' 와 원래 한 패널이었는데, 단위가 달라 축을 둘로 나눠야 했고\n그러면 Grafana 가 범례에 '(right y-axis)' 를 붙인다. 서로 다른 이야기를 하는\n지표라 패널을 나누는 편이 읽기에도 낫다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 38
+      },
+      "id": 11,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_memory_MemAvailable_bytes",
+          "legendFormat": "사용 가능 메모리"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "호스트 CPU 포화도",
+      "description": "load average 를 코어 수로 나눠 % 로 바꾼 값이다. t3.small 은 vCPU 2개.\n\n컨테이너 CPU % 와 무엇이 다른가 — 답하는 질문이 다르다.\n  컨테이너 CPU %  \"누가 얼마나 쓰고 있나\"       사용률(utilization)\n  CPU 포화도      \"쓰려는데 못 쓰고 기다리나\"    포화(saturation)\n\n사용률은 아무리 바빠도 100% 가 천장이라 100% 끼리는 구분이 안 된다.\n포화도는 그 위로 계속 올라가므로 '얼마나 심각한가'를 알려준다.\n\n  ~70%   여유\n  100%   코어를 꽉 채운 상태\n  100%+  처리 못한 작업이 줄 서 있음 = 응답이 느려지기 시작\n\n컨테이너 CPU 패널이 못 보는 것을 본다\n  1) 컨테이너 밖 — Docker 데몬, SSM Agent, cron, 이미지 pull 등\n  2) 디스크 대기 — 리눅스 load 는 CPU 뿐 아니라 I/O 를 기다리는 프로세스(D 상태)도 센다\n     그래서 'CPU 는 5% 인데 포화도 300%' 같은 상황이 나온다. EBS 가 느려졌거나\n     버스트 크레딧이 소진된 경우다. 컨테이너 CPU 만 보면 '문제 없음' 으로 읽힌다\n\n──────────────────────────────────────────────────────────────────────\n[2026-08 수정] 이 선이 그려지지 않던 문제\n\n  이전 쿼리:  100 * node_load1 / count(node_cpu_seconds_total{mode=\"idle\"})\n\n  PromQL 은 벡터끼리 나눌 때 양쪽 라벨이 일치해야 짝을 짓는다.\n    node_load1        → {instance=\"...\", job=\"node\"}\n    count(...) 결과   → 라벨 없음 (by 없이 집계하면 라벨이 전부 사라진다)\n  짝이 안 맞아 결과가 빈 벡터가 되고, 에러도 없이 선만 사라진다.\n\n  scalar() 로 감싸면 벡터가 숫자 하나가 되어 라벨 매칭을 건너뛴다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 38
+      },
+      "id": 24,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "100 * node_load1 / scalar(count(node_cpu_seconds_total{mode=\"idle\"}))",
+          "legendFormat": "CPU 포화도"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "네트워크 사용량 (컨테이너별, 대역폭 대비 %)",
+      "description": "각 컨테이너가 초당 주고받은 데이터(수신 + 송신)를, t3.small 이 지속 유지할 수 있는\n대역폭(약 16 MB/s)에 대한 비율로 환산했다.\n\n왜 % 인가 — '250 KB/s' 는 그 자체로 판단이 안 되는 숫자다. 한도가 16 MB/s 인지\n1 GB/s 인지 모르면 여유인지 위험인지 알 수 없다. 비율로 보면 바로 읽힌다.\n(디스크 패널을 사용률 % 로 둔 것과 같은 이유)\n\n위험 기준 (컨테이너 하나 기준)\n  ~25%    여유. 평소 우리 규모에서는 1% 도 안 나온다\n  25~50%  한 컨테이너가 서버 대역폭의 1/4 이상을 혼자 쓰는 중. 원인을 확인한다\n  50%+    위험\n\n  ※ 모든 선의 합이 100% 에 가까우면 대역폭이 곧 병목이 된다.\n\n튀는 컨테이너로 원인을 좁힌다\n  backend   /uploads/** 이미지 서빙이거나, RDS 와 주고받는 쿼리 결과다.\n            DB 가 RDS 로 빠지면서 DB 트래픽도 backend 선에 합쳐졌다.\n            '요청 수는 그대로인데 서버가 느리다'의 원인이 여기서 잡힌다\n  rabbitmq  채팅량 증가. 옆 채팅 패널과 함께 본다\n  frontend  정적 파일 서빙\n\n⚠️ t3 계열은 네트워크도 크레딧 방식이다. CPU 처럼 순간적으로는 훨씬 빠르지만,\n   지속 사용량이 baseline 을 넘으면 크레딧이 소진되고 속도가 baseline 으로 고정된다.\n   이때 증상이 'CPU 도 메모리도 멀쩡한데 갑자기 전체가 느려짐' 이다.\n   다른 패널이 전부 정상인데 서비스가 느리면 이 선들의 합을 확인할 것.\n   (호스트 NIC 기준 패널은 제거했다. 컨테이너 합계로 대신 판단한다)\n\n수신/송신을 더해 하나로 그린다. 방향까지 나누면 선이 배로 늘어 오히려 안 보인다.\n방향이 필요하면 Explore 에서:\n  sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n\n실제 바이트 값이 필요하면:\n  sum by (name) (rate(container_network_receive_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n  + sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n\n16 MB/s 는 t3.small 의 대략적인 baseline 이다. 인스턴스 타입을 바꾸면 이 분모도\n함께 바꿔야 한다(쿼리의 16000000).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "id": 14,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 2,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 25
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "100 * (sum by (name) (rate(container_network_receive_bytes_total{name=~\"gamehouse-.*\"}[5m])) + sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))) / 16000000",
+          "legendFormat": "{{name}}"
+        }
+      ]
     }
   ],
   "refresh": "30s",
