@@ -95,7 +95,7 @@
     {
       "type": "timeseries",
       "title": "전체 컨테이너 CPU %",
-      "description": "장애 대응의 출발점. 모든 컨테이너를 한 화면에 겹쳐 '누가 언제부터 바빠졌나'를 먼저 본다.\n컨테이너를 따로따로 보면 비교가 안 되어 범인을 못 찾는다.\n\n100% = CPU 코어 1개를 꽉 쓰는 중. 상한이 아니다 —\n코어가 여러 개면 100% 를 넘을 수 있다(t3.small 은 2코어이므로 최대 200%).\n\n_total 로 끝나는 counter 는 누적값이라 rate() 로 감싼다.\n결과 단위가 '코어 수'이므로 *100 이 %.\n\n호스트 전체 CPU 는 아래 '호스트 메모리 여유 / CPU 포화도' 패널에서 본다.",
+      "description": "장애 대응의 출발점. 모든 컨테이너를 한 화면에 겹쳐 '누가 언제부터 바빠졌나'를 먼저 본다.\n컨테이너를 따로따로 보면 비교가 안 되어 범인을 못 찾는다.\n\n100% = CPU 코어 1개를 꽉 쓰는 중. 상한이 아니다 —\n코어가 여러 개면 100% 를 넘을 수 있다(t3.small 은 2코어이므로 최대 200%).\n\n_total 로 끝나는 counter 는 누적값이라 rate() 로 감싼다.\n결과 단위가 '코어 수'이므로 *100 이 %.\n\n호스트 전체 CPU 는 아래 '호스트 메모리 여유 / CPU 포화도' 패널에서 본다.\n\nrate() 창을 [2m] 로 두는 이유\n  rate 는 창 안에 샘플이 최소 2개 있어야 계산된다.\n  scrape_interval 이 30초이므로 [1m] 창에는 샘플이 딱 2개뿐이라 여유가 없다.\n  수집이 한 번만 밀려도 창에 1개만 남아 그 시점이 빈칸이 되고,\n  선이 툭툭 끊기며 양옆이 비면 점 하나만 동그라미로 찍힌다.\n  경험칙: rate 창 >= scrape_interval x 4. 30초 수집이면 [2m] 이상.\n\n선이 끊길 때 확인 순서\n  up{job=\"cadvisor\"}                      끊긴 구간에 0 이면 수집 실패\n  scrape_duration_seconds{job=\"cadvisor\"} 10초에 근접하면 타임아웃\n  둘 다 멀쩡한데 그래프만 끊기면 rate 창 문제다.\n\n같은 이름이 두 줄로 보일 때\n  컨테이너를 재생성하면 컨테이너 ID 가 바뀐다. cAdvisor 는 ID 단위로\n  시계열을 만들므로 이름은 같지만 다른 시계열 2개가 된다.\n  옛 선은 시간이 지나면 조회 범위에서 빠진다. 정상이다.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -142,7 +142,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(container_cpu_usage_seconds_total{name=~\"gamehouse-.*\"}[1m]) * 100",
+          "expr": "rate(container_cpu_usage_seconds_total{name=~\"gamehouse-.*\"}[2m]) * 100",
           "legendFormat": "{{name}}"
         }
       ]
@@ -1156,6 +1156,6 @@
   "timezone": "browser",
   "title": "00 overview",
   "uid": "gamehouse-overview",
-  "version": 14,
+  "version": 15,
   "weekStart": ""
 }
