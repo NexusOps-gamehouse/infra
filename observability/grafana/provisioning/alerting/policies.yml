@@ -25,6 +25,24 @@ policies:
     repeat_interval: 4h
 
     routes:
+      # Riot 키 만료는 예외로 뺀다.
+      #
+      # 개발용 키가 24시간마다 만료되므로 이 알람은 사실상 매일 울린다.
+      # 다른 critical 과 같이 1시간마다 반복하면 하루에 몇 번씩 같은 알림이 오고,
+      # 그러다 Discord 알림을 통째로 꺼버리게 된다. 알람을 무력화하는 가장 흔한 경로다.
+      #
+      # 처음 한 번은 바로 알리되(group_wait 30s), 반복은 6시간으로 늦춘다.
+      # 대응(키 재발급 + 재배포)에 10분이면 충분하므로 6시간이면 잊을 일이 없다.
+      #
+      # ⚠️ routes 는 위에서부터 먼저 맞는 것 하나만 적용된다. 그래서 이 항목이
+      #    아래 severity=critical 규칙보다 위에 있어야 한다. 순서를 바꾸면 무시된다.
+      - receiver: discord
+        object_matchers:
+          - ['alertname', '=', 'Riot API 키 만료']
+        group_wait: 30s
+        group_interval: 30m
+        repeat_interval: 6h
+
       # 즉시 대응이 필요한 것. 그대로 두면 1시간마다 다시 알린다.
       - receiver: discord
         object_matchers:
