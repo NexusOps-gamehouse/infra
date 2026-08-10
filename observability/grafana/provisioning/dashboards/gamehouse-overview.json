@@ -356,97 +356,6 @@
       ]
     },
     {
-      "type": "stat",
-      "title": "에러 발생 건수 (최근 5분)",
-      "description": "최근 5분 동안 발생한 서버 오류(5xx) 건수. 비율이 아니라 실제 건수라 바로 읽힌다.\n\n0 이 정상이다. 1 건이라도 올라오면 그 시각의 backend 로그를 확인한다:\n  docker compose logs backend --since 10m | grep -i error\n\n4xx(잘못된 요청)는 사용자 입력 문제라 여기 포함하지 않는다.\n서버가 처리하다 실패한 5xx 만 센다.\n\n왜 그래프가 아니라 숫자인가\n  이 패널이 답하는 질문은 '지금 에러가 있나 없나' 하나뿐이다.\n  기준선이 0 이라 추세를 볼 것이 없고, 대부분의 시간 동안 바닥에 붙은\n  빈 그래프를 보게 된다. 숫자 하나가 0.1 초 만에 읽힌다.\n  언제 얼마나 났는지는 로그와 알람이 알려준다.\n\n읽는 법\n  전체        or vector(0) 덕분에 에러가 없어도 항상 0 이 보인다.\n              값이 사라지면 에러가 없는 것이 아니라 backend 수집이 끊긴 것이다.\n  엔드포인트   에러가 났을 때만 타일이 추가로 나타난다.\n              어디서 터졌는지가 바로 보인다.\n\nincrease() 는 추정값이라 1.8 처럼 소수가 나올 수 있다. 그래서 임계값을\n1 이 아니라 0.1 에 두었다. 소수 첫째 자리에서 반올림해 보여준다.\n\n이 지표는 Grafana 알람 '5xx 에러 발생'과 같은 쿼리를 쓴다.\n여기가 빨간색이면 5 분 뒤 Discord 로 통보된다.\n\nRiot API 키 만료 타일\n  개발용 키는 24 시간마다 만료된다. 만료되면 Riot 이 403 을 돌려주고,\n  그 예외가 잡히지 않아 /api/users/riot/sync 가 500 이 된다.\n  즉 키가 만료되면 이 패널의 전체 숫자는 이미 올라간다. 문제는 원인이\n  안 보인다는 것이다 — 엔드포인트 이름만으로는 키 문제인지 다른 버그인지 모른다.\n\n  그래서 원인 쪽에서 한 번 더 센다. 같은 사건을 두 번 세는 것이 아니라\n  왼쪽 두 타일이 왜 올라갔는지를 설명하는 타일이다.\n\n  401 은 키 헤더 누락(코드 문제), 403 은 만료 또는 무효다. 둘 다 대응이\n  '키를 확인한다'이므로 함께 센다.\n  429(레이트 리밋)는 제외했다. 키는 정상인데 많이 쓴 것이라 대응이 다르다.\n  그쪽은 'Riot 호출 횟수 (2분 / 100회 한도)' 패널이 담당한다.\n\n  대응: 새 키를 발급해 .env 의 RIOT_API_KEY 를 교체하고 backend 재배포.\n\n  ※ 나중에 백엔드가 403 을 정상 처리하면 5xx 는 0 이 되지만 이 타일은 계속\n    잡는다. 서버 오류가 아니어도 키 만료는 알아야 하기 때문이다.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 14
-      },
-      "id": 7,
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 0.1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "textMode": "value_and_name",
-        "wideLayout": true,
-        "percentChangeColorMode": "standard",
-        "showPercentChange": false,
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {
-          "titleSize": 16,
-          "valueSize": 56
-        }
-      },
-      "targets": [
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum(increase(http_server_requests_seconds_count{job=\"backend\",status=~\"5..\",uri!~\"/actuator.*|/ws/.*\"}[5m])) or vector(0)",
-          "legendFormat": "전체",
-          "instant": true
-        },
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (uri) (increase(http_server_requests_seconds_count{job=\"backend\",status=~\"5..\",uri!~\"/actuator.*|/ws/.*\"}[5m]))",
-          "legendFormat": "{{uri}}",
-          "instant": true
-        },
-        {
-          "refId": "C",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum(increase(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\",status=~\"401|403\"}[5m]))",
-          "legendFormat": "Riot API 키 만료",
-          "instant": true
-        }
-      ]
-    },
-    {
       "type": "timeseries",
       "title": "채팅 — 큐 적체 / 동시 접속자",
       "description": "대기 중 메시지(rabbitmq_queue_messages_ready) = 브로커에 쌓여 아직 소비되지 않은 메시지 수.\n\n0 근처에서 머물면 정상이다. 계속 늘어나면 소비 속도가 생산 속도를 못 따라가는 것 =\n채팅이 밀리고 있다는 뜻. 이때 backend CPU 와 응답시간을 함께 확인한다.\n\n앱의 chat_active_sessions 는 '지금 몇 명이 붙어 있나'를 보여준다.\n접속자가 늘었는데 큐도 같이 늘면 용량 한계 신호.",
@@ -522,7 +431,7 @@
     {
       "type": "timeseries",
       "title": "Riot 호출 횟수 (2분 / 100회 한도)",
-      "description": "개발용 API 키의 한도는 2분당 100회다. 최근 2분간 실제 호출 수를 응답 상태별로\n쌓아 올려, 전체 높이가 곧 총 호출 수가 되도록 했다. 빨간 점선이 한도(100)다.\n\n⚠️ 연동 1회에 API 를 4번 호출한다 (account → summoner → league → champion-mastery).\n   즉 2분에 25명만 연동해도 한도가 찬다. 생각보다 빡빡하다.\n\n읽는 법\n  전체 높이  최근 2분 총 호출 수. 점선(100)에 가까우면 곧 429 가 난다\n  200        정상 응답\n  429        레이트 리밋에 걸림. 이 조각이 보이면 이미 한도를 넘은 것\n  4xx        잘못된 요청 / 존재하지 않는 소환사 / 키 만료(403)\n  5xx        라이엇 서버 장애. 우리 잘못이 아니다\n\n  ~70    여유\n  70~100 주의. 시연이나 테스트를 몰아서 하면 곧 넘는다\n  100+   초과. 429 조각이 함께 나타난다\n\n한계\n  - 이 값은 '우리가 센 횟수'이지 라이엇이 센 값이 아니다. 정확히 하려면\n    응답 헤더 X-App-Rate-Limit-Count 를 읽어 Gauge 로 노출해야 한다(추후 과제).\n  - 또 하나의 한도인 '1초 20회'는 이 방식으로 볼 수 없다. 수집 주기가 30초라\n    1초 안의 순간 버스트가 평균으로 뭉개지기 때문이다.\n\n응답 지연이 궁금하면 Explore 에서:\n  histogram_quantile(0.95, sum by (le) (rate(http_client_requests_seconds_bucket{job=\"backend\"}[5m])))\n\n빈 화면이면 라이엇 호출이 없었던 것이다. 라벨 이름이 다를 수도 있으니\nExplore 에서 http_client_requests_seconds_count 를 조회해 client_name 값을 확인할 것.",
+      "description": "개발용 API 키의 한도는 2분당 100회다. 최근 2분간 실제 호출 수를 응답 상태별로\n쌓아 올려, 전체 높이가 곧 총 호출 수가 되도록 했다. 빨간 점선이 한도(100)다.\n\n⚠️ 연동 1회에 API 를 4번 호출한다 (account → summoner → league → champion-mastery).\n   즉 2분에 25명만 연동해도 한도가 찬다. 생각보다 빡빡하다.\n\n읽는 법\n  전체 높이  최근 2분 총 호출 수. 점선(100)에 가까우면 곧 429 가 난다\n  200        정상 응답\n  429        레이트 리밋에 걸림. 이 조각이 보이면 이미 한도를 넘은 것\n  4xx        잘못된 요청 / 존재하지 않는 소환사 / 키 만료(403)\n  5xx        라이엇 서버 장애. 우리 잘못이 아니다\n\n  ~70    여유\n  70~100 주의. 시연이나 테스트를 몰아서 하면 곧 넘는다\n  100+   초과. 429 조각이 함께 나타난다\n\n한계\n  - 이 값은 '우리가 센 횟수'이지 라이엇이 센 값이 아니다. 정확히 하려면\n    응답 헤더 X-App-Rate-Limit-Count 를 읽어 Gauge 로 노출해야 한다(추후 과제).\n  - 또 하나의 한도인 '1초 20회'는 이 방식으로 볼 수 없다. 수집 주기가 30초라\n    1초 안의 순간 버스트가 평균으로 뭉개지기 때문이다.\n\n응답 지연이 궁금하면 Explore 에서:\n  histogram_quantile(0.95, sum by (le) (rate(http_client_requests_seconds_bucket{job=\"backend\"}[5m])))\n\n빈 화면이면 라이엇 호출이 없었던 것이다. 라벨 이름이 다를 수도 있으니\nExplore 에서 http_client_requests_seconds_count 를 조회해 client_name 값을 확인할 것.\n\n'전체 호출' 점선\n  이 그래프는 누적(stacking)이라 색칠된 영역의 맨 윗선이 이미 총합이다.\n  한도선과 비교할 때는 그 윗선만 보면 되고, 상태별 선을 더할 필요가 없다.\n  (한도 선은 stacking:none 으로 빼두어 항상 100 에 고정된다.)\n\n  그럼 왜 굳이 점선을 겹쳐 그리는가 — 하단 범례 때문이다.\n  범례는 시리즈별 값만 보여주므로 총합을 알려면 눈으로 더해야 했다.\n  이 선의 Last / Max 칸이 그 숫자를 그대로 준다.\n  선 자체는 스택 윗선과 겹치므로 화면을 어지럽히지 않는다.\n\n  or vector(0) 로 호출이 없어도 0 이 그려진다. 선이 사라지면 호출이 없는\n  것이 아니라 backend 수집이 끊긴 것이다.\n\n  ※ 401/403 은 키가 식별되지 않아 엄밀히는 앱 단위 예산에 잡히지 않는다.\n    그래도 총합에 포함시켰다. 과대평가는 안전한 방향이고, 구분하면\n    '한도가 얼마 남았나'라는 이 패널의 질문이 흐려지기 때문이다.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -570,6 +479,45 @@
           }
         },
         "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "전체 호출"
+            },
+            "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    8,
+                    6
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
           {
             "matcher": {
               "id": "byName",
@@ -650,6 +598,15 @@
           },
           "expr": "sum by (status) (increase(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\"}[2m]))",
           "legendFormat": "{{status}}"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\"}[2m])) or vector(0)",
+          "legendFormat": "전체 호출"
         },
         {
           "refId": "B",
@@ -1150,6 +1107,152 @@
           "legendFormat": "{{name}}"
         }
       ]
+    },
+    {
+      "type": "stat",
+      "title": "에러 발생 건수 (최근 5분)",
+      "id": 7,
+      "description": "최근 5분 동안 발생한 서버 오류(5xx) 건수. 비율이 아니라 실제 건수라 바로 읽힌다.\n\n0 이 정상이다. 1 건이라도 올라오면 아래 '에러 엔드포인트' 패널에서 위치를 보고\n그 시각의 backend 로그를 확인한다:\n  docker compose logs backend --since 10m | grep -i error\n\n4xx(잘못된 요청)는 사용자 입력 문제라 여기 포함하지 않는다.\n서버가 처리하다 실패한 5xx 만 센다.\n\n타일 두 개인 이유 — 결론과 원인이다\n  전체              몇 건인가\n  Riot API 키 만료   그 원인이 키 문제인가\n'어디서'는 아래 패널이 답한다. 큰 숫자를 셋으로 늘리면 무엇이 결론인지 흐려진다.\n\n전체는 or vector(0) 덕분에 에러가 없어도 항상 0 이 보인다.\n값이 사라지면 에러가 없는 것이 아니라 backend 수집이 끊긴 것이다.\n\nRiot API 키 만료 타일\n  개발용 키는 24 시간마다 만료된다. 만료되면 Riot 이 401 을 돌려주고\n  (403 이 아니다 — 실제로 확인했다), 그 예외가 잡히지 않아 sync 가 500 이 된다.\n  즉 전체 숫자는 이미 올라가지만 원인은 보이지 않는다. 그래서 원인 쪽에서 한 번 더 센다.\n  401 은 키 헤더 누락, 403 은 무효. 둘 다 대응이 '키를 확인한다'라 함께 센다.\n  429(레이트 리밋)는 제외 — 키는 정상인데 많이 쓴 것이라 대응이 다르다.\n  대응: 새 키 발급 → .env 의 RIOT_API_KEY 교체 → docker compose up -d backend\n        (restart 는 환경변수를 다시 읽지 않는다)\n\nincrease() 는 추정값이라 1.8 처럼 소수가 나온다. 그래서 임계값을 1 이 아니라 0.1 에 두었다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 15,
+          "valueSize": 52
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "legendFormat": "전체",
+          "expr": "sum(increase(http_server_requests_seconds_count{job=\"backend\",status=~\"5..\",uri!~\"/actuator.*|/ws/.*\"}[5m])) or vector(0)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "legendFormat": "Riot API 키 만료",
+          "expr": "sum(increase(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\",status=~\"401|403\"}[5m])) or vector(0)"
+        }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "title": "에러 엔드포인트 (최근 5분)",
+      "id": 20,
+      "description": "위 패널이 '몇 건'과 '왜'에 답한다면 이 패널은 '어디서'에 답한다.\n\n옆 패널들이 하단 범례에 이름과 수치를 나열하는 것과 같은 역할이다.\nstat 패널에는 범례가 없어서 패널을 나눴다. 큰 숫자 옆에 엔드포인트를 같은\n크기로 붙이면 무엇이 결론인지 흐려지기 때문이다.\n\n에러가 없으면 아무것도 표시되지 않는다('에러 없음'). 이름이 뜨는 순간이\n곧 봐야 할 곳이다.\n\n여기서 엔드포인트를 확인한 뒤 로그로 넘어간다:\n  docker compose logs backend --since 10m | grep -i error\n메트릭은 감지까지, 원인은 로그에 있다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 8,
+        "x": 16,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 0,
+          "noValue": "에러 없음",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "showUnfilled": false,
+        "valueMode": "color",
+        "namePlacement": "left",
+        "minVizWidth": 8,
+        "minVizHeight": 12,
+        "sizing": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "legendFormat": "{{uri}}",
+          "expr": "sum by (uri) (increase(http_server_requests_seconds_count{job=\"backend\",status=~\"5..\",uri!~\"/actuator.*|/ws/.*\"}[5m]))"
+        }
+      ]
     }
   ],
   "refresh": "30s",
@@ -1169,6 +1272,6 @@
   "timezone": "browser",
   "title": "00 overview",
   "uid": "gamehouse-overview",
-  "version": 17,
+  "version": 20,
   "weekStart": ""
 }
