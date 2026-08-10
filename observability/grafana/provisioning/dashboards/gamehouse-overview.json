@@ -356,9 +356,9 @@
       ]
     },
     {
-      "type": "timeseries",
-      "title": "에러 발생 건수",
-      "description": "최근 5분 동안 발생한 서버 오류(5xx) 건수. 비율이 아니라 실제 건수라 바로 읽힌다.\n\n0 이 정상이다. 1 건이라도 올라오면 그 시각의 backend 로그를 확인한다:\n  docker compose logs backend --since 10m | grep -i error\n\n4xx(잘못된 요청)는 사용자 입력 문제라 여기 포함하지 않는다.\n서버가 처리하다 실패한 5xx 만 센다.\n\n'전체' 선은 or vector(0) 으로 항상 그려진다. 에러가 하나도 없을 때 빈 화면 대신\n0 을 보여주기 위한 것이다. 에러가 나면 그 위에 엔드포인트별 막대가 함께 뜬다.",
+      "type": "stat",
+      "title": "에러 발생 건수 (최근 5분)",
+      "description": "최근 5분 동안 발생한 서버 오류(5xx) 건수. 비율이 아니라 실제 건수라 바로 읽힌다.\n\n0 이 정상이다. 1 건이라도 올라오면 그 시각의 backend 로그를 확인한다:\n  docker compose logs backend --since 10m | grep -i error\n\n4xx(잘못된 요청)는 사용자 입력 문제라 여기 포함하지 않는다.\n서버가 처리하다 실패한 5xx 만 센다.\n\n왜 그래프가 아니라 숫자인가\n  이 패널이 답하는 질문은 '지금 에러가 있나 없나' 하나뿐이다.\n  기준선이 0 이라 추세를 볼 것이 없고, 대부분의 시간 동안 바닥에 붙은\n  빈 그래프를 보게 된다. 숫자 하나가 0.1 초 만에 읽힌다.\n  언제 얼마나 났는지는 로그와 알람이 알려준다.\n\n읽는 법\n  전체        or vector(0) 덕분에 에러가 없어도 항상 0 이 보인다.\n              값이 사라지면 에러가 없는 것이 아니라 backend 수집이 끊긴 것이다.\n  엔드포인트   에러가 났을 때만 타일이 추가로 나타난다.\n              어디서 터졌는지가 바로 보인다.\n\nincrease() 는 추정값이라 1.8 처럼 소수가 나올 수 있다. 그래서 임계값을\n1 이 아니라 0.1 에 두었다. 소수 첫째 자리에서 반올림해 보여준다.\n\n이 지표는 Grafana 알람 '5xx 에러 발생'과 같은 쿼리를 쓴다.\n여기가 빨간색이면 5 분 뒤 Discord 로 통보된다.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -374,13 +374,8 @@
         "defaults": {
           "unit": "short",
           "min": 0,
-          "decimals": 1,
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 20,
-            "showPoints": "auto",
-            "drawStyle": "bars"
-          },
+          "decimals": 0,
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -390,7 +385,7 @@
               },
               {
                 "color": "red",
-                "value": 1
+                "value": 0.1
               }
             ]
           }
@@ -398,30 +393,27 @@
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "wideLayout": true,
+        "percentChangeColorMode": "standard",
+        "showPercentChange": false,
+        "reduceOptions": {
           "calcs": [
-            "lastNotNull",
-            "max"
+            "lastNotNull"
           ],
-          "showLegend": true
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
+        "text": {
+          "titleSize": 16,
+          "valueSize": 56
         }
       },
       "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (uri) (increase(http_server_requests_seconds_count{job=\"backend\",status=~\"5..\",uri!~\"/actuator.*|/ws/.*\"}[5m]))",
-          "legendFormat": "{{uri}}"
-        },
         {
           "refId": "B",
           "datasource": {
@@ -429,7 +421,18 @@
             "uid": "prometheus"
           },
           "expr": "sum(increase(http_server_requests_seconds_count{job=\"backend\",status=~\"5..\",uri!~\"/actuator.*|/ws/.*\"}[5m])) or vector(0)",
-          "legendFormat": "전체"
+          "legendFormat": "전체",
+          "instant": true
+        },
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (uri) (increase(http_server_requests_seconds_count{job=\"backend\",status=~\"5..\",uri!~\"/actuator.*|/ws/.*\"}[5m]))",
+          "legendFormat": "{{uri}}",
+          "instant": true
         }
       ]
     },
@@ -1156,6 +1159,6 @@
   "timezone": "browser",
   "title": "00 overview",
   "uid": "gamehouse-overview",
-  "version": 15,
+  "version": 16,
   "weekStart": ""
 }
