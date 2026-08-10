@@ -1,0 +1,369 @@
+apiVersion: 1
+
+# ---------------------------------------------------------------------------
+# 알람 규칙
+#
+# 설계 원칙: "이 알람이 울리면 지금 사람이 뭔가 해야 하는가?" 아니면 걸지 않는다.
+# 울려도 할 일이 없는 알람이 섞이면 결국 전부 무시하게 되고, 그러다 진짜를 놓친다.
+# 5xx 패널에서 4xx 를 걷어낸 것과 같은 이유다.
+#
+# 각 규칙의 구조
+#   data[0]  refId A  — Prometheus 쿼리 (instant: 지금 값 하나만)
+#   data[1]  refId B  — 임계값 판정 (__expr__ = Grafana 내장 연산)
+#   condition: B      — B 가 참이면 알람
+#
+# for (Pending period)
+#   조건이 이 시간만큼 "계속" 참이어야 알린다. 순간 튐과 배포 중 재시작으로
+#   울리지 않게 하는 장치다. 배포 한 번에 컨테이너가 몇십 초 비므로 3분이 하한.
+#
+# noDataState 를 규칙마다 다르게 둔 이유는 각 규칙 주석에 적었다.
+# 이 값을 잘못 두면 알람이 조용히 죽거나(NoData) 배포마다 울린다(Alerting).
+# ---------------------------------------------------------------------------
+groups:
+  # =========================================================================
+  # 🔴 서비스 중단 — 즉시 대응
+  # =========================================================================
+  - orgId: 1
+    name: service-down
+    folder: alerts
+    interval: 1m
+    rules:
+      # ---------------------------------------------------------------------
+      # 규칙 하나로 job 두 개를 본다. Grafana 는 시계열마다 알림 인스턴스를
+      # 따로 만들므로, backend 가 죽으면 backend 알림, rabbitmq 가 죽으면
+      # rabbitmq 알림이 각각 나간다. 규칙을 job 수만큼 만들 필요가 없다.
+      #
+      # rabbitmq 를 backend 와 같은 등급에 둔 이유:
+      #   rabbitmq 가 죽으면 채팅만 멈추고 backend 는 살아 있다.
+      #   5xx 도 p95 도 정상으로 보이므로 다른 알람이 절대 잡지 못한다.
+      #
+      # noDataState: Alerting
+      #   up 은 대상이 죽어도 0 으로 남는다. 시계열 자체가 사라졌다면
+      #   Prometheus 가 job 을 잃은 것이므로 그것도 이상 신호다.
+      # ---------------------------------------------------------------------
+      - uid: gh-service-down
+        title: 핵심 서비스 중단
+        condition: B
+        for: 3m
+        noDataState: Alerting
+        execErrState: Alerting
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.job }} 컨테이너가 3분째 응답하지 않습니다'
+          description: 'docker compose ps 로 상태를 보고, docker compose logs --tail 100 {{ $labels.job }} 로 원인을 찾습니다. 과거 사례: DB 비밀번호 불일치로 backend 가 Exited(1) 된 적이 있습니다.'
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              expr: 'up{job=~"backend|rabbitmq"}'
+              instant: true
+              range: false
+              legendFormat: '{{job}}'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource: { type: __expr__, uid: __expr__ }
+              conditions:
+                - type: query
+                  evaluator: { type: lt, params: [1] }
+                  operator: { type: and }
+                  query: { params: [B] }
+                  reducer: { type: last, params: [] }
+
+      # ---------------------------------------------------------------------
+      # frontend 는 prometheus.yml 의 job 목록에 없다. serve 에는 메트릭
+      # 엔드포인트가 없기 때문이다. 그래서 up 으로는 감지되지 않는다.
+      #
+      # 이 사각지대가 위험한 이유
+      #   frontend 가 죽으면 사용자는 사이트를 못 연다.
+      #   그런데 up 패널은 전부 초록불이고, 요청이 backend 에 닿지 않으니
+      #   5xx 도 0 건이다. 대시보드만 보면 완전히 정상으로 보인다.
+      #
+      # cAdvisor 의 container_last_seen 으로 메운다. 컨테이너가 사라지면
+      # 시계열이 없어지고 absent() 가 1 을 반환한다.
+      #
+      # noDataState: OK  ← 반대로 두면 안 된다
+      #   absent() 는 대상이 "있을 때" 아무 값도 반환하지 않는다.
+      #   즉 frontend 가 정상이면 이 쿼리는 No Data 다. Alerting 으로 두면
+      #   평소에 계속 울린다.
+      # ---------------------------------------------------------------------
+      - uid: gh-frontend-down
+        title: frontend 컨테이너 중단
+        condition: B
+        for: 5m
+        noDataState: OK
+        execErrState: Alerting
+        labels:
+          severity: critical
+        annotations:
+          summary: 'frontend 컨테이너가 사라졌습니다 (사이트가 열리지 않습니다)'
+          description: 'frontend 는 메트릭 엔드포인트가 없어 up 패널에 나오지 않습니다. cAdvisor 의 container_last_seen 으로 감지한 것입니다. docker compose ps 로 확인하세요.'
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              expr: 'absent(container_last_seen{name="gamehouse-frontend"})'
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource: { type: __expr__, uid: __expr__ }
+              conditions:
+                - type: query
+                  evaluator: { type: gt, params: [0] }
+                  operator: { type: and }
+                  query: { params: [B] }
+                  reducer: { type: last, params: [] }
+
+  # =========================================================================
+  # 🔴 앱 오류
+  # =========================================================================
+  - orgId: 1
+    name: application
+    folder: alerts
+    interval: 1m
+    rules:
+      # ---------------------------------------------------------------------
+      # 이 알람은 4xx 를 걷어낸 뒤에야 의미가 생겼다.
+      # 예전에는 사용자가 없는 Riot ID 를 입력할 때마다 500 이 찍혀서 5xx 가
+      # 늘 몇 건씩 떠 있었고, 그 상태로 알람을 걸면 오타 알림이 계속 울렸을 것이다.
+      # 지금은 404 로 내려가므로 5xx 의 기준선이 0 이다. 울리면 진짜다.
+      #
+      # /actuator 와 /ws 제외 — 수집기 자기 요청과 WebSocket 핸드셰이크다.
+      #
+      # noDataState: OK
+      #   backend 가 죽으면 이 쿼리는 No Data 가 되는데, 그 상황은 위의
+      #   '핵심 서비스 중단'이 이미 잡는다. 여기서 또 울리면 중복이다.
+      # ---------------------------------------------------------------------
+      - uid: gh-http-5xx
+        title: 5xx 에러 발생
+        condition: B
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: critical
+        annotations:
+          summary: '최근 5분간 5xx 에러가 {{ $values.A }}건 발생했습니다'
+          description: '대시보드의 "에러 발생 건수" 패널에서 어느 엔드포인트인지 확인하고, docker compose logs backend 로 스택트레이스를 봅니다. 메트릭은 감지까지, 원인은 로그에 있습니다.'
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              expr: 'sum(increase(http_server_requests_seconds_count{job="backend",status=~"5..",uri!~"/actuator.*|/ws/.*"}[5m]))'
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource: { type: __expr__, uid: __expr__ }
+              conditions:
+                - type: query
+                  evaluator: { type: gt, params: [0] }
+                  operator: { type: and }
+                  query: { params: [B] }
+                  reducer: { type: last, params: [] }
+
+  # =========================================================================
+  # 🟠 호스트 자원 — 여유는 있지만 방치하면 서비스가 멈춘다
+  # =========================================================================
+  - orgId: 1
+    name: host
+    folder: alerts
+    interval: 1m
+    rules:
+      # ---------------------------------------------------------------------
+      # 임계값 80% 의 근거 (20GB gp3 기준, 남는 여유 약 4GB)
+      #
+      #   Prometheus 예약분   최대 2GB  --storage.tsdb.retention.size=2GB
+      #                                 아직 7일치가 안 찼다면 앞으로 반드시 늘어날 몫
+      #   배포 1회분          약 0.5GB  새 이미지. 옛 이미지는 prune 전까지 남는다
+      #   ------------------------------------------------------------------
+      #   실질 여유           약 2GB  = 배포 3~4회분
+      #
+      # 90% 로 두면 여유 2GB 가 통째로 Prometheus 예약분이라 실질 여유가 0 이다.
+      # 배포 한 번에 꽉 찬다.
+      #
+      # 임계값의 목적은 "위험"을 알리는 것이 아니라 "지금 조치하면 늦지 않은 시점"을
+      # 잡는 것이다. 디스크가 꽉 차면 docker image prune 같은 명령조차 실패할 수 있다.
+      #
+      # 데이터가 몇 주 쌓이면 예측형으로 바꾸는 것을 검토한다.
+      #   predict_linear(node_filesystem_avail_bytes{mountpoint="/"}[6h], 7*24*3600) < 0
+      #   = "이 추세면 일주일 안에 꽉 찬다". 지금은 배포로 계단식으로 뛰어 오탐이 잦다.
+      # ---------------------------------------------------------------------
+      - uid: gh-host-disk
+        title: 호스트 디스크 사용률 높음
+        condition: B
+        for: 10m
+        noDataState: NoData
+        execErrState: Alerting
+        labels:
+          severity: warning
+        annotations:
+          summary: 'EC2 디스크 사용률 {{ humanize $values.A.Value }}% (임계 80%)'
+          description: '도커 이미지가 쌓인 것이 1순위 원인입니다. docker image prune -f 로 정리하세요. 꽉 차면 컨테이너가 뜨지 않고 복구 명령조차 실패할 수 있습니다.'
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              expr: '100 * (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay|ramfs|devtmpfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay|ramfs|devtmpfs"})'
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource: { type: __expr__, uid: __expr__ }
+              conditions:
+                - type: query
+                  evaluator: { type: gt, params: [80] }
+                  operator: { type: and }
+                  query: { params: [B] }
+                  reducer: { type: last, params: [] }
+
+      # ---------------------------------------------------------------------
+      # t3.small 은 2GB 다. 여기에 앱 스택과 관측 스택이 함께 올라가 있어
+      # 이미 swap 2GB 를 붙여 버티는 중이다.
+      #
+      # 컨테이너가 여유로워 보여도 호스트가 마르면 커널의 OOM killer 가
+      # "가장 큰 프로세스" = backend JVM 을 골라 죽인다. 그래서 컨테이너 메모리
+      # 패널만 봐서는 예측할 수 없고 이 지표가 따로 필요하다.
+      #
+      # 200MB 인 이유: 이 아래로 내려가면 swap 사용이 급증하고, swap 은
+      # 디스크라 모든 것이 느려진다. 죽기 전에 먼저 느려지는 구간을 잡는다.
+      # ---------------------------------------------------------------------
+      - uid: gh-host-memory
+        title: 호스트 메모리 여유 부족
+        condition: B
+        for: 5m
+        noDataState: NoData
+        execErrState: Alerting
+        labels:
+          severity: warning
+        annotations:
+          summary: 'EC2 여유 메모리 {{ humanize1024 $values.A.Value }}B (임계 200MB)'
+          description: 't3.small 2GB. 이 아래로 내려가면 swap 사용이 늘어 전체가 느려지고, 더 내려가면 OOM killer 가 backend JVM 을 죽입니다. free -h 와 docker stats 로 확인하세요.'
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              expr: 'node_memory_MemAvailable_bytes'
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource: { type: __expr__, uid: __expr__ }
+              conditions:
+                - type: query
+                  evaluator: { type: lt, params: [209715200] }
+                  operator: { type: and }
+                  query: { params: [B] }
+                  reducer: { type: last, params: [] }
+
+  # =========================================================================
+  # 🟡 관측 스택 저하 — 서비스는 정상이다
+  # =========================================================================
+  - orgId: 1
+    name: observability
+    folder: alerts
+    interval: 1m
+    rules:
+      # ---------------------------------------------------------------------
+      # 이들이 죽어도 사용자는 아무 영향을 받지 않는다. 다만 그때부터
+      # "아무 일도 없었다"와 "수집이 끊겼다"를 구분할 수 없게 된다.
+      #
+      # 관측 스택의 장애는 조용하다. 앱이 깨지면 사용자가 알려주지만,
+      # 관측이 깨지면 화면이 그럴듯하게 비어 있을 뿐이다. 그래서 알람이 필요하되
+      # 등급은 낮다. for 를 15분으로 길게 둔 것도 배포 때마다 울리지 않기 위함이다.
+      #
+      # ⚠️ prometheus job 은 일부러 뺐다. Prometheus 가 죽으면 알람을 평가할
+      #    주체 자체가 사라지므로 규칙을 걸어도 무의미하다.
+      #    Grafana 도 Prometheus 도 같은 EC2 안에 있어 EC2 가 죽으면 알람도 같이 죽는다.
+      #    이 영역은 CloudWatch 의 ec2-status-check-failed 가 담당한다.
+      #    관측 스택 밖에서 보는 눈이 반드시 하나 필요한 이유다.
+      # ---------------------------------------------------------------------
+      - uid: gh-observability-down
+        title: 관측 수집 중단
+        condition: B
+        for: 15m
+        noDataState: Alerting
+        execErrState: Alerting
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.job }} 수집이 15분째 끊겼습니다 (서비스는 정상)'
+          description: '이 job 이 담당하는 패널이 비어 보이게 됩니다. 사용자 영향은 없으므로 급하지 않지만, 방치하면 진짜 장애 때 볼 데이터가 없습니다. http://localhost:19090/targets 에서 확인하세요.'
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              expr: 'up{job=~"cadvisor|node|postgres"}'
+              instant: true
+              range: false
+              legendFormat: '{{job}}'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource: { type: __expr__, uid: __expr__ }
+              conditions:
+                - type: query
+                  evaluator: { type: lt, params: [1] }
+                  operator: { type: and }
+                  query: { params: [B] }
+                  reducer: { type: last, params: [] }
