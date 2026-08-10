@@ -79,6 +79,11 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       # 로그인 화면에서 회원가입 링크 제거
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # provisioning/alerting/contact-points.yml 이 $__env{DISCORD_WEBHOOK_URL} 로 읽는다.
+      # webhook URL 은 그 자체가 비밀번호라 파일에 적지 않고 .env 로만 주입한다.
+      # :? 를 붙여 값이 없으면 기동 자체를 실패시킨다. 없이 뜨면 알람 규칙은 평가되는데
+      # 통보만 조용히 안 나가서, 로그를 보지 않으면 알아채기 어렵다.
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:?DISCORD_WEBHOOK_URL is required}
     ports:
       # 기본값 127.0.0.1 = 호스트 내부 전용(로컬 개발용, 안전한 기본값).
       # 외부에서 브라우저로 접근해야 하는 서버(EC2)에서만 .env 에
