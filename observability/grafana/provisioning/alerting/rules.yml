@@ -193,6 +193,67 @@ groups:
                   query: { params: [B] }
                   reducer: { type: last, params: [] }
 
+      # ---------------------------------------------------------------------
+      # Riot 개발용 키는 24 시간마다 만료된다. "언젠가 생길 사고"가 아니라
+      # 매일 일어나는 일이라 알람으로 두는 것이 맞다.
+      #
+      # 상태 코드로 원인이 명확히 갈린다
+      #   401  키 헤더 누락        → 코드 문제
+      #   403  만료 또는 무효      → 새 키 발급          ← 이 알람
+      #   429  레이트 리밋 초과    → 잠시 대기 (키는 정상)
+      #   404  없는 소환사         → 사용자 오타
+      #
+      # 429 를 뺀 이유: 대응이 "새 키 발급"이 아니라 "기다림"이다.
+      # 완전히 다른 사건을 한 알람에 묶으면 메시지에 대응 방법을 적을 수 없다.
+      #
+      # 이 알람이 없어도 5xx 알람은 울린다. 403 이 예외로 새어 나가
+      # /api/users/riot/sync 가 500 이 되기 때문이다. 다만 그 알람은
+      # "5xx 3건"까지만 알려주고 원인을 말해주지 않아 로그를 열어야 한다.
+      # 이 규칙의 값어치는 감지가 아니라 원인 특정에 있다.
+      #
+      # ⚠️ 한계: 호출이 있어야 감지된다. 새벽에 키가 만료되고 아무도 연동을
+      #    시도하지 않으면 403 자체가 생기지 않아 알람도 뜨지 않는다.
+      #    지표는 일어난 일만 기록한다. 완전히 막으려면 백엔드에 주기적
+      #    헬스 체크(10분마다 1회)가 필요하다.
+      # ---------------------------------------------------------------------
+      - uid: gh-riot-key-expired
+        title: Riot API 키 만료
+        condition: B
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Riot API 호출이 거부되고 있습니다 (최근 10분 {{ $values.A }}건)'
+          description: '개발용 키는 24시간마다 만료됩니다. https://developer.riotgames.com 에서 새 키를 발급해 .env 의 RIOT_API_KEY 를 교체하고 backend 를 재배포하세요. 429(레이트 리밋)는 이 알람에 포함되지 않으므로, 울렸다면 키 문제가 맞습니다.'
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              expr: 'sum(increase(http_client_requests_seconds_count{job="backend",client_name=~".*riotgames.*",status=~"401|403"}[10m])) or vector(0)'
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              datasource: { type: __expr__, uid: __expr__ }
+              conditions:
+                - type: query
+                  evaluator: { type: gt, params: [0.1] }
+                  operator: { type: and }
+                  query: { params: [B] }
+                  reducer: { type: last, params: [] }
+
   # =========================================================================
   # 🟠 호스트 자원 — 여유는 있지만 방치하면 서비스가 멈춘다
   # =========================================================================
