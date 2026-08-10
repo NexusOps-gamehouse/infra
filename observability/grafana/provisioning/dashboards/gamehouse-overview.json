@@ -1118,7 +1118,7 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 5,
+        "h": 4,
         "w": 8,
         "x": 16,
         "y": 14
@@ -1149,7 +1149,7 @@
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "orientation": "horizontal",
+        "orientation": "auto",
         "textMode": "value_and_name",
         "wideLayout": true,
         "showPercentChange": false,
@@ -1161,8 +1161,8 @@
           "values": false
         },
         "text": {
-          "titleSize": 15,
-          "valueSize": 52
+          "titleSize": 14,
+          "valueSize": 44
         }
       },
       "targets": [
@@ -1189,28 +1189,67 @@
       ]
     },
     {
-      "type": "bargauge",
+      "type": "table",
       "title": "에러 엔드포인트 (최근 5분)",
       "id": 20,
-      "description": "위 패널이 '몇 건'과 '왜'에 답한다면 이 패널은 '어디서'에 답한다.\n\n옆 패널들이 하단 범례에 이름과 수치를 나열하는 것과 같은 역할이다.\nstat 패널에는 범례가 없어서 패널을 나눴다. 큰 숫자 옆에 엔드포인트를 같은\n크기로 붙이면 무엇이 결론인지 흐려지기 때문이다.\n\n에러가 없으면 아무것도 표시되지 않는다('에러 없음'). 이름이 뜨는 순간이\n곧 봐야 할 곳이다.\n\n여기서 엔드포인트를 확인한 뒤 로그로 넘어간다:\n  docker compose logs backend --since 10m | grep -i error\n메트릭은 감지까지, 원인은 로그에 있다.",
+      "description": "위 패널이 '몇 건'과 '왜'에 답한다면 이 패널은 '어디서'에 답한다.\n옆 패널들의 하단 범례와 같은 역할이라 같은 모양(이름 + 수치 표)으로 맞췄다.\n\nstat 패널에는 범례가 없어서 패널을 나눴다. 큰 숫자 옆에 엔드포인트를 같은\n크기로 붙이면 무엇이 결론인지 흐려지기 때문이다.\n\n에러가 없으면 표가 비어 있다. 줄이 생기는 순간이 곧 봐야 할 곳이다.\n\n여기서 엔드포인트를 확인한 뒤 로그로 넘어간다:\n  docker compose logs backend --since 10m | grep -i error\n메트릭은 감지까지, 원인은 로그에 있다.\n\ninstant 쿼리에 format: table 을 쓰면 Prometheus 가 Time / uri / Value 열로 준다.\norganize 변환으로 Time 을 숨기고 열 이름만 한글로 바꿨다.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 3,
+        "h": 4,
         "w": 8,
         "x": 16,
-        "y": 19
+        "y": 18
       },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "format": "table",
+          "expr": "sum by (uri) (increase(http_server_requests_seconds_count{job=\"backend\",status=~\"5..\",uri!~\"/actuator.*|/ws/.*\"}[5m]))"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "uri": "엔드포인트",
+              "Value": "건수"
+            },
+            "indexByName": {}
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "건수",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "min": 0,
-          "decimals": 0,
-          "noValue": "에러 없음",
-          "color": {
-            "mode": "thresholds"
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
           },
           "thresholds": {
             "mode": "absolute",
@@ -1222,37 +1261,51 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "건수"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              },
+              {
+                "id": "custom.align",
+                "value": "right"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
-        "displayMode": "basic",
-        "orientation": "horizontal",
-        "showUnfilled": false,
-        "valueMode": "color",
-        "namePlacement": "left",
-        "minVizWidth": 8,
-        "minVizHeight": 12,
-        "sizing": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "countRows": false,
           "fields": "",
-          "values": false
+          "reducer": [
+            "sum"
+          ]
         }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "instant": true,
-          "legendFormat": "{{uri}}",
-          "expr": "sum by (uri) (increase(http_server_requests_seconds_count{job=\"backend\",status=~\"5..\",uri!~\"/actuator.*|/ws/.*\"}[5m]))"
-        }
-      ]
+      }
     }
   ],
   "refresh": "30s",
@@ -1272,6 +1325,6 @@
   "timezone": "browser",
   "title": "00 overview",
   "uid": "gamehouse-overview",
-  "version": 20,
+  "version": 21,
   "weekStart": ""
 }
