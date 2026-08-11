@@ -16,6 +16,19 @@ apiVersion: 1
 #   조건이 이 시간만큼 "계속" 참이어야 알린다. 순간 튐과 배포 중 재시작으로
 #   울리지 않게 하는 장치다. 배포 한 번에 컨테이너가 몇십 초 비므로 3분이 하한.
 #
+# 알림 문구의 숫자 서식
+#   {{ $values.A }} 는 원시 float 을 그대로 찍는다. 실제로 Discord 에
+#   "5xx 에러가 1.1111111111111112건" 이라고 나갔다.
+#   반드시 printf 로 자릿수를 정한다: {{ printf "%.0f" $values.A.Value }}
+#
+#   값이 1 이 아니라 1.111 인 것은 서식 문제가 아니라 increase() 의 성질이다.
+#   increase() 는 창 경계에서 실제 관측점 사이를 외삽(extrapolation)한다.
+#   30초마다 긁는데 창은 5분이라 경계에 정확히 맞는 샘플이 없고,
+#   Prometheus 가 비율로 늘려 추정한다. 그래서 1건이 1.11 로 나온다.
+#   임계값을 1 이 아니라 0.1 로 둔 이유도 이것이다(반대로 0.83 처럼 줄어들 수도 있다).
+#   즉 이 숫자는 "정확히 몇 건"이 아니라 "대략 몇 건"이다. 문구에 '약' 을 붙였다.
+#   정확한 건수가 필요하면 대시보드의 '에러 엔드포인트' 표를 본다.
+#
 # noDataState 를 규칙마다 다르게 둔 이유는 각 규칙 주석에 적었다.
 # 이 값을 잘못 두면 알람이 조용히 죽거나(NoData) 배포마다 울린다(Alerting).
 # ---------------------------------------------------------------------------
@@ -164,7 +177,7 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: '최근 5분간 5xx 에러가 {{ $values.A }}건 발생했습니다'
+          summary: '최근 5분간 5xx 에러가 약 {{ printf "%.0f" $values.A.Value }}건 발생했습니다'
           description: '대시보드의 "에러 발생 건수" 패널에서 어느 엔드포인트인지 확인하고, docker compose logs backend 로 스택트레이스를 봅니다. 메트릭은 감지까지, 원인은 로그에 있습니다.'
         data:
           - refId: A
@@ -225,7 +238,7 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: 'Riot API 호출이 거부되고 있습니다 (최근 10분 {{ $values.A }}건)'
+          summary: 'Riot API 호출이 거부되고 있습니다 (최근 10분 약 {{ printf "%.0f" $values.A.Value }}건)'
           description: '개발용 키는 24시간마다 만료됩니다. https://developer.riotgames.com 에서 새 키를 발급해 .env 의 RIOT_API_KEY 를 교체하고 backend 를 재배포하세요. 429(레이트 리밋)는 이 알람에 포함되지 않으므로, 울렸다면 키 문제가 맞습니다.'
         data:
           - refId: A
@@ -290,7 +303,7 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: 'EC2 디스크 사용률 {{ humanize $values.A.Value }}% (임계 80%)'
+          summary: 'EC2 디스크 사용률 {{ printf "%.1f" $values.A.Value }}% (임계 80%)'
           description: '도커 이미지가 쌓인 것이 1순위 원인입니다. docker image prune -f 로 정리하세요. 꽉 차면 컨테이너가 뜨지 않고 복구 명령조차 실패할 수 있습니다.'
         data:
           - refId: A
