@@ -1,43 +1,33 @@
 services:
 
-  # ==============================================================
-  # Local Backend Override
-  #
-  # 기본 docker-compose.yml의 Backend는 RDS를 바라본다.
-  # Local에서는 DB_URL을 postgres 서비스로 override 한다.
-  # ==============================================================
   backend:
+    pull_policy: never
 
     environment:
-      DB_URL: jdbc:postgresql://postgres:5432/duo
-      DB_USERNAME: duo
-      DB_PASSWORD: local-duo-password
+      DB_URL: jdbc:postgresql://${LOCAL_DB_HOST}:${LOCAL_DB_PORT}/${LOCAL_DB_NAME}
+      DB_USERNAME: ${LOCAL_DB_USERNAME}
+      DB_PASSWORD: ${LOCAL_DB_PASSWORD}
 
     depends_on:
+      rabbitmq:
+        condition: service_healthy
       postgres:
         condition: service_healthy
 
 
-  # ==============================================================
-  # Local PostgreSQL
-  #
-  # AWS에서는 존재하지 않는 Local 전용 서비스.
-  # ==============================================================
-  postgres:
+  frontend:
+    pull_policy: never
 
+
+  postgres:
     image: postgres:16
 
-    container_name: gamehouse-postgres
-
     environment:
-      POSTGRES_DB: duo
-      POSTGRES_USER: duo
-      POSTGRES_PASSWORD: local-duo-password
+      POSTGRES_DB: ${LOCAL_DB_NAME}
+      POSTGRES_USER: ${LOCAL_DB_USERNAME}
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD}
 
     ports:
-      # Host → Container
-      #
-      # Mac에 설치된 PostgreSQL 5432와 충돌하지 않도록 15432 사용.
       - "15432:5432"
 
     volumes:
@@ -50,7 +40,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U duo -d duo"
+          "pg_isready -U ${LOCAL_DB_USERNAME} -d ${LOCAL_DB_NAME}"
         ]
       interval: 5s
       timeout: 5s
@@ -59,5 +49,4 @@ services:
 
 
 volumes:
-
   postgres-data:
