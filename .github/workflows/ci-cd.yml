@@ -1,33 +1,15 @@
 name: infra-ci-cd
 
-# infra 저장소는 backend/frontend 와 성격이 다르다.
-#
-#   - 빌드해서 올릴 이미지가 없다. 관측 스택은 전부 업스트림 이미지
-#     (prom/prometheus, grafana/grafana ...)를 그대로 쓴다.
-#     따라서 image-check / publish 단계가 통째로 필요 없고,
-#     CD 가 할 일은 "설정 파일을 서버에 반영하고 재기동"뿐이다.
-#
-#   - 대신 설정이 깨지면 컨테이너가 조용히 죽거나 수집이 멈춘다.
-#     그래서 검증 단계는 compose 문법과 prometheus.yml 유효성에 집중한다.
-#
-# 이 워크플로가 없던 동안에는 prometheus.yml 을 고쳐도 아무 일도 일어나지 않았다.
-# (파일은 deploy.sh 의 git pull 로 EC2 에 내려가지만, 컨테이너가 재기동되지
-#  않아 적용되지 않았다.)
+
 on:
+
   pull_request:
-    branches: [develop]
+    branches:
+      - develop
+
     paths:
       - 'docker-compose.yml'
-      - 'docker-compose.observability.yml'
-      - 'observability/**'
-      - 'rabbitmq/**'
-      - 'scripts/**'
-      - '.env.example'
-      - '.github/workflows/ci-cd.yml'
-  push:
-    branches: [develop]
-    paths:
-      - 'docker-compose.yml'
+      - 'docker-compose.local.yml'
       - 'docker-compose.observability.yml'
       - 'observability/**'
       - 'rabbitmq/**'
@@ -35,137 +17,272 @@ on:
       - '.env.example'
       - '.github/workflows/ci-cd.yml'
 
-# push(=develop merge=배포)는 중간에 끊기면 안 되므로 PR 실행만 취소한다.
+
+  push:
+    branches:
+      - develop
+
+    paths:
+      - 'docker-compose.yml'
+      - 'docker-compose.local.yml'
+      - 'docker-compose.observability.yml'
+      - 'observability/**'
+      - 'rabbitmq/**'
+      - 'scripts/**'
+      - '.env.example'
+      - '.github/workflows/ci-cd.yml'
+
+
 concurrency:
+
   group: ${{ github.workflow }}-${{ github.ref }}
+
+  # PR 검증만 취소 가능.
+  # develop 배포는 중간에 끊지 않는다.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+
 permissions:
+
   contents: read
+
   id-token: write
 
-jobs:
-  # ---------------------------------------------------------------
-  # [PR 게이트] 설정 파일 검증
-  # 서버에 반영되기 전에 문법 오류를 잡는 것이 목적이다.
-  # ---------------------------------------------------------------
-  verify:
-    name: verify (config validation)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
 
-      # SAST: .env 는 gitignore 되어 있지만, 실수로 커밋되는 순간을 잡는다.
-      # 이 저장소는 시크릿이 가장 많이 지나가는 곳이라 특히 중요하다.
+jobs:
+
+  # ===============================================================
+  # VERIFY
+  # ===============================================================
+
+  verify:
+
+    name: verify (config validation)
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 10
+
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      # -------------------------------------------------------------
+      # Secret Scan
+      # -------------------------------------------------------------
+
       - name: Secret scan (gitleaks)
         run: |
-          docker run --rm -v "${PWD}:/repo" zricethezav/gitleaks:v8.18.4 \
-            detect --source=/repo --no-git --redact --verbose
 
-      # compose 는 ${VAR:?required} 문법을 쓰므로 .env 가 없으면 검증 자체가
-      # 실패한다. 실제 값은 필요 없고 "키가 다 있는지"만 보면 되므로
-      # .env.example 을 그대로 쓴다.
+          docker run \
+            --rm \
+            -v "${PWD}:/repo" \
+            zricethezav/gitleaks:v8.18.4 \
+            detect \
+            --source=/repo \
+            --no-git \
+            --redact \
+            --verbose
+
+
+      # -------------------------------------------------------------
+      # Compose validation용 dummy env
       #
-      # 부수 효과가 하나 더 있다. compose 에서 새 변수를 참조하면서
-      # .env.example 에 추가하는 것을 잊으면 여기서 걸린다.
+      # 실제 secret은 사용하지 않는다.
+      # -------------------------------------------------------------
+
       - name: Prepare .env from example
-        run: cp .env.example .env
-
-      # build: ../backend 컨텍스트는 이 저장소에 없지만,
-      # compose config 는 빌드 컨텍스트의 존재를 확인하지 않는다.
-      # (EC2 에서도 infra 만 클론된 상태로 동일하게 동작한다)
-      - name: Validate compose files
         run: |
-          docker compose -f docker-compose.yml config >/dev/null
-          echo "docker-compose.yml OK"
 
-          docker compose -f docker-compose.observability.yml config >/dev/null
-          echo "docker-compose.observability.yml OK"
+          cp .env.example .env
 
-      # prometheus.yml 이 깨지면 컨테이너는 뜨지만 수집이 안 된다.
-      # 대시보드가 빈 화면이 되고 나서야 알게 되는 종류의 장애라 미리 잡는다.
-      # compose 와 같은 버전의 이미지에 들어 있는 promtool 로 검사한다.
+
+      # -------------------------------------------------------------
+      # Production Compose
+      #
+      # AWS에서 실제로 사용하는 구성.
+      # PostgreSQL container가 포함되면 안 된다.
+      # -------------------------------------------------------------
+
+      - name: Validate production compose
+        run: |
+
+          docker compose \
+            -f docker-compose.yml \
+            config >/dev/null
+
+          echo "Production docker-compose.yml OK"
+
+
+      # -------------------------------------------------------------
+      # Local Compose
+      #
+      # base + local override를 합친 최종 개발 환경을 검증한다.
+      # -------------------------------------------------------------
+
+      - name: Validate local compose
+        run: |
+
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.local.yml \
+            config >/dev/null
+
+          echo "Local compose configuration OK"
+
+
+      # -------------------------------------------------------------
+      # Observability Compose
+      # -------------------------------------------------------------
+
+      - name: Validate observability compose
+        run: |
+
+          docker compose \
+            -f docker-compose.observability.yml \
+            config >/dev/null
+
+          echo "Observability compose configuration OK"
+
+
+      # -------------------------------------------------------------
+      # Prometheus
+      # -------------------------------------------------------------
+
       - name: Validate prometheus config (promtool)
         run: |
-          docker run --rm -v "${PWD}/observability:/cfg:ro" \
-            --entrypoint promtool prom/prometheus:v2.55.1 \
-            check config /cfg/prometheus.yml
 
-      # 대시보드 JSON 이 깨져 있으면 Grafana 가 조용히 그 파일만 건너뛴다.
-      # 에러가 로그에만 남아서 눈치채기 어렵다.
+          docker run \
+            --rm \
+            -v "${PWD}/observability:/cfg:ro" \
+            --entrypoint promtool \
+            prom/prometheus:v2.55.1 \
+            check config \
+            /cfg/prometheus.yml
+
+
+      # -------------------------------------------------------------
+      # Grafana dashboards
+      # -------------------------------------------------------------
+
       - name: Validate Grafana dashboard JSON
         run: |
+
           for f in observability/grafana/provisioning/dashboards/*.json; do
-            python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f"
+
+            python3 -c \
+              "import json,sys; json.load(open(sys.argv[1]))" \
+              "$f"
+
             echo "${f} OK"
+
           done
 
-  # ---------------------------------------------------------------
-  # [배포] develop merge 이후에만 실행
+
+  # ===============================================================
+  # DEPLOY
   #
-  # backend/frontend 워크플로와 같은 deploy.sh 를 호출한다.
-  # deploy.sh 가 본 스택과 관측 스택을 모두 갱신하므로,
-  # 어느 저장소에서 트리거하든 서버 상태는 같은 곳으로 수렴한다.
-  # ---------------------------------------------------------------
+  # Local compose는 절대 사용하지 않는다.
+  # deploy.sh 자체가 docker-compose.yml만 명시적으로 사용한다.
+  # ===============================================================
+
   deploy:
+
     name: deploy
-    needs: verify
+
+    needs:
+      - verify
+
     if: github.event_name == 'push'
+
     runs-on: ubuntu-latest
+
     timeout-minutes: 15
 
+
     permissions:
+
       id-token: write
+
       contents: read
 
+
     steps:
-      - uses: actions/checkout@v4
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
+
         with:
+
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # ⚠️ 이 방식은 시크릿이 SSM 명령 이력에 남는 문제가 있다.
-      #    backend/frontend 워크플로와 동일한 구조라 일단 맞춰두었고,
-      #    개선 방안은 docs/cd-secret-handling.md 참고.
+
       - name: Encode ENV_FILE
         run: |
-          printf "%s" "${{ secrets.ENV_FILE }}" | base64 -w0 > env.b64
+
+          printf "%s" "${{ secrets.ENV_FILE }}" \
+            | base64 -w0 \
+            > env.b64
+
 
       - name: Deploy via SSM
         run: |
+
           ENV_B64=$(cat env.b64)
 
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
-            --document-name "AWS-RunShellScript" \
-            --comment "Deploy GameHouse (infra)" \
-            --parameters "commands=[
-              \"echo '$ENV_B64' | base64 -d > /home/ssm-user/infra/.env\",
-              \"sudo chown ssm-user:ssm-user /home/ssm-user/infra/.env\",
-              \"sudo -u ssm-user -H bash /home/ssm-user/infra/scripts/deploy.sh\"
+          COMMAND_ID=$(
+
+            aws ssm send-command \
+              --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+              --document-name "AWS-RunShellScript" \
+              --comment "Deploy GameHouse (infra)" \
+              --parameters "commands=[
+                \"echo '$ENV_B64' | base64 -d > /home/ssm-user/infra/.env\",
+                \"sudo chown ssm-user:ssm-user /home/ssm-user/infra/.env\",
+                \"sudo chmod 600 /home/ssm-user/infra/.env\",
+                \"sudo -u ssm-user -H bash /home/ssm-user/infra/scripts/deploy.sh\"
               ]" \
-            --query "Command.CommandId" \
-            --output text)
+              --query "Command.CommandId" \
+              --output text
+
+          )
 
           echo "Command ID: $COMMAND_ID"
 
+
           for i in {1..60}; do
-            STATUS=$(aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
-              --query "Status" \
-              --output text)
+
+            STATUS=$(
+
+              aws ssm get-command-invocation \
+                --command-id "$COMMAND_ID" \
+                --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+                --query "Status" \
+                --output text
+
+            )
+
 
             echo "Current Status: $STATUS"
 
+
             if [ "$STATUS" = "Success" ]; then
+
               echo "Deployment succeeded!"
+
               break
+
             fi
+
 
             if [ "$STATUS" = "Failed" ] || \
                [ "$STATUS" = "Cancelled" ] || \
@@ -176,10 +293,14 @@ jobs:
                 --instance-id "${{ secrets.EC2_INSTANCE_ID }}"
 
               exit 1
+
             fi
 
+
             sleep 5
+
           done
+
 
           aws ssm get-command-invocation \
             --command-id "$COMMAND_ID" \

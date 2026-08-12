@@ -1,0 +1,52 @@
+services:
+
+  backend:
+    pull_policy: never
+
+    environment:
+      DB_URL: jdbc:postgresql://${LOCAL_DB_HOST}:${LOCAL_DB_PORT}/${LOCAL_DB_NAME}
+      DB_USERNAME: ${LOCAL_DB_USERNAME}
+      DB_PASSWORD: ${LOCAL_DB_PASSWORD}
+
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+
+  frontend:
+    pull_policy: never
+
+
+  postgres:
+    image: postgres:16
+
+    environment:
+      POSTGRES_DB: ${LOCAL_DB_NAME}
+      POSTGRES_USER: ${LOCAL_DB_USERNAME}
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD}
+
+    ports:
+      - "15432:5432"
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+    networks:
+      - backend-net
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${LOCAL_DB_USERNAME} -d ${LOCAL_DB_NAME}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+
+volumes:
+  postgres-data:

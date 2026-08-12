@@ -5,21 +5,24 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-CONTAINERS=(
+# ================================================================
+# Compose files
+#
+# 운영 배포에서는 반드시 기본 compose만 사용한다.
+# docker-compose.local.yml은 개발자 PC 전용이며 EC2에서는 사용하지 않는다.
+# ================================================================
+
+APP_FILE="docker-compose.yml"
+OBSERVE_FILE="docker-compose.observability.yml"
+
+
+APP_CONTAINERS=(
   "gamehouse-rabbitmq"
   "gamehouse-backend"
   "gamehouse-frontend"
 )
 
-# 관측 스택은 별도 compose 프로젝트(name: gamehouse-observe)라 기본 파일만 보는
-# `docker compose` 명령에 잡히지 않는다. -f 로 명시해야 한다.
-#
-# 순서가 중요하다. 이 스택은 gamehouse_backend-net 을 external 로 참조하므로
-# 본 스택이 먼저 떠 있어야 한다. 그래서 본 스택 기동/헬스체크가 끝난 뒤에 올린다.
-OBSERVE_FILE="docker-compose.observability.yml"
 
-# 관측 컨테이너에는 healthcheck 를 정의하지 않았으므로
-# wait_for_health 는 .State.Status(=running) 로 판정한다.
 OBSERVE_CONTAINERS=(
   "gamehouse-cadvisor"
   "gamehouse-node-exporter"
@@ -28,13 +31,16 @@ OBSERVE_CONTAINERS=(
   "gamehouse-postgres-exporter"
 )
 
+
 wait_for_health() {
+
   local container="$1"
   local status=""
 
   echo "Checking ${container}..."
 
   for _ in $(seq 1 36); do
+
     status="$(
       docker inspect \
         --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
@@ -42,33 +48,50 @@ wait_for_health() {
     )"
 
     case "${status}" in
+
       healthy|running)
         echo "${container}: ${status}"
         return 0
         ;;
 
       unhealthy|exited|dead)
+
         echo "${container}: ${status}"
-        docker logs --tail=100 "${container}" || true
+
+        docker logs \
+          --tail=100 \
+          "${container}" || true
+
         return 1
         ;;
+
     esac
 
     echo "${container}: ${status:-waiting}"
+
     sleep 5
+
   done
 
+
   echo "${container}: health check timed out"
-  docker logs --tail=100 "${container}" || true
+
+  docker logs \
+    --tail=100 \
+    "${container}" || true
+
   return 1
 }
 
+
 wait_for_actuator() {
+
   local response=""
 
   echo "Checking backend actuator..."
 
   for _ in $(seq 1 30); do
+
     response="$(
       curl \
         --fail \
@@ -79,20 +102,33 @@ wait_for_actuator() {
         2>/dev/null || true
     )"
 
-    if grep -Eq '"status"[[:space:]]*:[[:space:]]*"UP"' <<< "${response}"; then
+    if grep -Eq \
+      '"status"[[:space:]]*:[[:space:]]*"UP"' \
+      <<< "${response}"; then
+
       echo "Backend actuator: UP"
+
       return 0
     fi
 
     echo "Backend actuator: waiting"
+
     sleep 5
+
   done
 
+
   echo "Backend actuator health check timed out"
+
   echo "${response}"
-  docker logs --tail=100 gamehouse-backend || true
+
+  docker logs \
+    --tail=100 \
+    gamehouse-backend || true
+
   return 1
 }
+
 
 echo "========================================"
 echo "GameHouse deployment started"
@@ -100,126 +136,186 @@ echo "========================================"
 
 cd "${INFRA_DIR}"
 
+
+# ================================================================
+# 1. Update infra repository
+# ================================================================
+
 echo "[1/9] Updating infra repository..."
 
 if [[ "$(id -u)" -eq 0 ]]; then
+
   sudo -u ssm-user -H \
-    git -C "${INFRA_DIR}" pull --ff-only origin develop
+    git -C "${INFRA_DIR}" \
+    pull --ff-only origin develop
+
 else
+
   git pull --ff-only origin develop
+
 fi
+
+
+# ================================================================
+# 2. Validate Compose
+#
+# IMPORTANT:
+# Local compose 파일은 검증/실행 대상이 아니다.
+# AWS는 RDS를 사용한다.
+# ================================================================
 
 echo "[2/9] Validating Docker Compose..."
 
-# 두 파일 모두 검증한다. .env 에 GF_ADMIN_PASSWORD 같은 필수값이 빠져 있으면
-# 컨테이너를 건드리기 전에 여기서 멈추는 편이 안전하다.
-docker compose config >/dev/null
-docker compose -f "${OBSERVE_FILE}" config >/dev/null
+docker compose \
+  -f "${APP_FILE}" \
+  config >/dev/null
+
+docker compose \
+  -f "${OBSERVE_FILE}" \
+  config >/dev/null
+
+
+# ================================================================
+# 3. Pull application images
+# ================================================================
 
 echo "[3/9] Pulling Docker images..."
 
-docker compose pull
+docker compose \
+  -f "${APP_FILE}" \
+  pull
 
-echo "[4/9] Starting containers..."
 
-docker compose up -d --remove-orphans
+# ================================================================
+# 4. Start application stack
+# ================================================================
+
+echo "[4/9] Starting application containers..."
+
+docker compose \
+  -f "${APP_FILE}" \
+  up -d \
+  --remove-orphans
+
+
+# ================================================================
+# 5. Container health
+# ================================================================
 
 echo "[5/9] Checking container health..."
 
-for container in "${CONTAINERS[@]}"; do
+for container in "${APP_CONTAINERS[@]}"; do
+
   if ! wait_for_health "${container}"; then
+
     echo "Deployment failed."
 
-    docker compose ps
-    docker compose logs --tail=100
+    docker compose \
+      -f "${APP_FILE}" \
+      ps
+
+    docker compose \
+      -f "${APP_FILE}" \
+      logs --tail=100
 
     exit 1
+
   fi
+
 done
+
+
+# ================================================================
+# 6. Spring actuator
+#
+# 여기서 DB 연결까지 포함한 애플리케이션 기동 상태를 확인한다.
+# RDS 연결 실패도 이 단계에서 배포 실패로 감지한다.
+# ================================================================
 
 echo "[6/9] Checking backend actuator..."
 
 if ! wait_for_actuator; then
+
   echo "Deployment failed."
 
-  docker compose ps
-  docker compose logs --tail=100 backend
+  docker compose \
+    -f "${APP_FILE}" \
+    ps
+
+  docker compose \
+    -f "${APP_FILE}" \
+    logs --tail=100 backend
 
   exit 1
+
 fi
 
-# ---------------------------------------------------------------------------
-# 관측 스택
-#
-# 여기까지 왔다면 앱은 이미 정상 기동한 상태다. 아래에서 실패해도 앱은 살아 있고,
-# "관측이 깨졌다"는 사실만 파이프라인에 빨간불로 알리는 것이 목적이다.
-#
-# up -d 는 설정과 이미지가 그대로면 컨테이너를 재생성하지 않는다(멱등).
-# 따라서 backend/frontend 배포에서 매번 같이 돌려도 부담이 없고,
-# prometheus.yml 이나 datasources.yml 이 바뀐 배포에서만 실제로 교체된다.
-#
-# 참고: Grafana 대시보드 JSON 은 dashboards.yml 의 updateIntervalSeconds: 30
-#       덕분에 재기동 없이도 반영되지만, prometheus.yml 은 사정이 다르다.
-#       아래 [8/9] 참고.
-# ---------------------------------------------------------------------------
+
+# ================================================================
+# 7. Observability
+# ================================================================
+
 echo "[7/9] Starting observability stack..."
 
-# cadvisor 가 :latest 태그라 pull 할 때마다 상위 버전이 내려올 수 있다.
-# 배포 재현성을 위해 고정 태그로 되돌리는 것을 권장한다.
-docker compose -f "${OBSERVE_FILE}" pull
-docker compose -f "${OBSERVE_FILE}" up -d --remove-orphans
+docker compose \
+  -f "${OBSERVE_FILE}" \
+  pull
 
-# ---------------------------------------------------------------------------
-# prometheus.yml 다시 읽히기
-#
-# 이 파일은 bind mount 다. 내용이 바뀌어도 compose 입장에서는 "설정이 그대로"이므로
-# 위의 up -d 가 컨테이너를 재생성하지 않는다. 그 결과 디스크의 파일은 최신인데
-# Prometheus 프로세스는 기동 시 읽은 옛 설정을 계속 들고 도는 상태가 된다.
-# 새 수집 대상(job)을 추가해도 대시보드에 나타나지 않는 원인이 이것이다.
-#
-# 그런데 SIGHUP 도, restart 도 이것만으로는 부족하다. 더 밑에 함정이 하나 더 있다.
-#
-#   volumes:
-#     - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-#
-# Docker 가 "파일 하나"를 마운트할 때는 그 파일의 inode 에 묶는다.
-# 그런데 git pull 은 파일을 제자리에서 고치지 않고 지웠다가 새로 만든다(=새 inode).
-# 그래서 호스트의 파일은 최신인데 컨테이너 안에서는 옛 inode 를 계속 보게 된다.
-# 이 상태에서 SIGHUP 을 보내면 Prometheus 는 '옛 파일'을 성공적으로 다시 읽고,
-# 로그에는 "Completed loading of configuration file" 이라고 남긴다. 완벽한 거짓 성공이다.
-#
-# restart 도 같은 컨테이너를 다시 시작하는 것이라 마운트가 그대로다.
-# --force-recreate 로 컨테이너를 새로 만들어야 경로가 다시 해석된다.
-#
-# 덤으로 검증도 공짜로 따라온다. 설정이 깨져 있으면 새 컨테이너가 기동에 실패하고,
-# 바로 아래 [9/9] 헬스체크가 그걸 잡는다. 대가는 수집이 몇 초 비는 것뿐이다.
-#
-# (Grafana 는 디렉터리를 마운트하므로 이 문제가 없다. 경로를 그때그때 해석한다.
-#  대시보드 JSON 만 잘 반영되고 prometheus.yml 만 안 되던 이유가 이것이었다)
-# ---------------------------------------------------------------------------
+docker compose \
+  -f "${OBSERVE_FILE}" \
+  up -d \
+  --remove-orphans
+
+
+# ================================================================
+# 8. Prometheus config refresh
+# ================================================================
+
 echo "[8/9] Recreating Prometheus to apply config..."
 
-docker compose -f "${OBSERVE_FILE}" up -d --force-recreate prometheus
+docker compose \
+  -f "${OBSERVE_FILE}" \
+  up -d \
+  --force-recreate \
+  prometheus
+
+
+# ================================================================
+# 9. Observability health
+# ================================================================
 
 echo "[9/9] Checking observability container health..."
 
 for container in "${OBSERVE_CONTAINERS[@]}"; do
-  if ! wait_for_health "${container}"; then
-    echo "Observability stack failed to start."
-    echo "The application itself is running - only monitoring is degraded."
 
-    docker compose -f "${OBSERVE_FILE}" ps
-    docker compose -f "${OBSERVE_FILE}" logs --tail=100
+  if ! wait_for_health "${container}"; then
+
+    echo "Observability stack failed to start."
+    echo "Application is running, but monitoring is degraded."
+
+    docker compose \
+      -f "${OBSERVE_FILE}" \
+      ps
+
+    docker compose \
+      -f "${OBSERVE_FILE}" \
+      logs --tail=100
 
     exit 1
+
   fi
+
 done
 
-docker compose ps
-docker compose -f "${OBSERVE_FILE}" ps
 
-# 롤백 방식을 만든 뒤 활성화하는 것을 권장합니다.
-# docker image prune -f
+docker compose \
+  -f "${APP_FILE}" \
+  ps
+
+docker compose \
+  -f "${OBSERVE_FILE}" \
+  ps
+
 
 echo "========================================"
 echo "Deployment succeeded"
