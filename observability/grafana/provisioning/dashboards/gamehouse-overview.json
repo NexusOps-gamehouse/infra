@@ -431,7 +431,7 @@
     {
       "type": "timeseries",
       "title": "Riot 호출 횟수 (2분 / 100회 한도)",
-      "description": "개발용 API 키의 한도는 2분당 100회다. 최근 2분간 실제 호출 수를 응답 상태별로\n쌓아 올려, 전체 높이가 곧 총 호출 수가 되도록 했다. 빨간 점선이 한도(100)다.\n\n⚠️ 연동 1회에 API 를 4번 호출한다 (account → summoner → league → champion-mastery).\n   즉 2분에 25명만 연동해도 한도가 찬다. 생각보다 빡빡하다.\n\n읽는 법\n  전체 높이  최근 2분 총 호출 수. 점선(100)에 가까우면 곧 429 가 난다\n  200        정상 응답\n  429        레이트 리밋에 걸림. 이 조각이 보이면 이미 한도를 넘은 것\n  4xx        잘못된 요청 / 존재하지 않는 소환사 / 키 만료(403)\n  5xx        라이엇 서버 장애. 우리 잘못이 아니다\n\n  ~70    여유\n  70~100 주의. 시연이나 테스트를 몰아서 하면 곧 넘는다\n  100+   초과. 429 조각이 함께 나타난다\n\n한계\n  - 이 값은 '우리가 센 횟수'이지 라이엇이 센 값이 아니다. 정확히 하려면\n    응답 헤더 X-App-Rate-Limit-Count 를 읽어 Gauge 로 노출해야 한다(추후 과제).\n  - 또 하나의 한도인 '1초 20회'는 이 방식으로 볼 수 없다. 수집 주기가 30초라\n    1초 안의 순간 버스트가 평균으로 뭉개지기 때문이다.\n\n응답 지연이 궁금하면 Explore 에서:\n  histogram_quantile(0.95, sum by (le) (rate(http_client_requests_seconds_bucket{job=\"backend\"}[5m])))\n\n빈 화면이면 라이엇 호출이 없었던 것이다. 라벨 이름이 다를 수도 있으니\nExplore 에서 http_client_requests_seconds_count 를 조회해 client_name 값을 확인할 것.\n\n'전체 호출' 점선\n  이 그래프는 누적(stacking)이라 색칠된 영역의 맨 윗선이 이미 총합이다.\n  한도선과 비교할 때는 그 윗선만 보면 되고, 상태별 선을 더할 필요가 없다.\n  (한도 선은 stacking:none 으로 빼두어 항상 100 에 고정된다.)\n\n  그럼 왜 굳이 점선을 겹쳐 그리는가 — 하단 범례 때문이다.\n  범례는 시리즈별 값만 보여주므로 총합을 알려면 눈으로 더해야 했다.\n  이 선의 Last / Max 칸이 그 숫자를 그대로 준다.\n  선 자체는 스택 윗선과 겹치므로 화면을 어지럽히지 않는다.\n\n  or vector(0) 로 호출이 없어도 0 이 그려진다. 선이 사라지면 호출이 없는\n  것이 아니라 backend 수집이 끊긴 것이다.\n\n  ※ 401/403 은 키가 식별되지 않아 엄밀히는 앱 단위 예산에 잡히지 않는다.\n    그래도 총합에 포함시켰다. 과대평가는 안전한 방향이고, 구분하면\n    '한도가 얼마 남았나'라는 이 패널의 질문이 흐려지기 때문이다.",
+      "description": "개발용 API 키의 한도는 2분당 100회다. 빨간 점선이 그 한도다.\n\n★ 한도는 '호스트별로 따로' 센다 — 이 패널의 핵심\n  우리는 두 호스트를 쓴다.\n    asia.api.riotgames.com   Account API            연동 1회당 1호출\n    kr.api.riotgames.com     Summoner/League/Mastery 연동 1회당 3호출\n  각자 독립된 100회 예산을 갖는다. 그래서 절대 합쳐서 보면 안 되고,\n  stacking 도 꺼두었다. 합계는 어느 예산도 대표하지 않는 숫자다.\n\n  실제 측정값이 이것을 증명한다. 연타로 한도를 때렸을 때\n    asia  성공 35회, 429 0회      ← 예산 여유\n    kr    성공 100회, 429 2회     ← 정확히 100 에서 차단\n  총 137회였지만 걸린 것은 kr 하나뿐이다.\n\n  따라서 병목은 kr 이고, 2분에 33명만 연동해도(33×3=99) 한도가 찬다.\n  (예전 설명의 '25명'은 두 호스트를 합쳐 4회로 계산한 오류였다.)\n\n★ increase() 를 쓰지 않는 이유\n  increase(x[2m]) 는 창 안의 샘플만으로 계산한 뒤 창 끝까지 '외삽'한다.\n  수집 주기가 30초면 2분 창에 샘플이 4개뿐이라 실제 관측 구간은 90초다.\n  Prometheus 는 90초분을 120초분으로 늘려 잡으므로 120/90 = 약 1.33배,\n  즉 33% 크게 나온다. 실제로 kr 100회가 135 로 보였다.\n  (알람 규칙의 [5m] 은 300/270 = 1.11배. 같은 현상이고 창이 짧을수록 심하다.)\n\n  그래서 max_over_time - min_over_time 을 쓴다. 창 안에서 관측된 최댓값과\n  최솟값의 차이라 외삽이 없고, 실제로 센 값이 그대로 나온다.\n  단점: 창 안에서 시리즈가 처음 생기면 그 첫 건은 0 으로 잡히고,\n  backend 재시작으로 카운터가 리셋되면 값이 튄다. 둘 다 '추세를 본다'는\n  이 패널의 목적에는 문제가 되지 않는 수준이다.\n\n읽는 법\n  각 호스트 선   최근 2분간 그 호스트로 나간 호출 수. 각자 100 이 한도다\n  429            한도에 걸린 건수. 0 이 아니면 이미 넘긴 것\n\n  ~70    여유\n  70~100 주의. 시연이나 테스트를 몰아서 하면 곧 넘는다\n  100    차단 시작\n\n한계\n  - 이 값은 '우리가 센 횟수'이지 라이엇이 센 값이 아니다. 정확히 하려면\n    응답 헤더 X-App-Rate-Limit-Count 를 읽어 Gauge 로 노출해야 한다(추후 과제).\n  - 또 하나의 한도인 '1초 20회'는 이 방식으로 볼 수 없다. 수집 주기가 30초라\n    1초 안의 순간 버스트가 평균으로 뭉개지기 때문이다.\n  - 정확한 건수가 꼭 필요하면 /actuator/prometheus 를 직접 본다. 그 값은\n    추정이 섞이지 않은 누적 카운터다.\n\n429 시리즈만 increase() 를 쓴다. 건수가 한 자릿수라 max-min 으로는 첫 건이\n0 으로 뭉개지기 때문이다. 여기서는 '몇 건인지'보다 '0 인지 아닌지'가 중요하다.\n\n응답 지연이 궁금하면 Explore 에서:\n  histogram_quantile(0.95, sum by (le) (rate(http_client_requests_seconds_bucket{job=\"backend\"}[5m])))\n\n빈 화면이면 라이엇 호출이 없었던 것이다. 라벨 이름이 다를 수도 있으니\nExplore 에서 http_client_requests_seconds_count 를 조회해 client_name 값을 확인할 것.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -453,8 +453,7 @@
             "fillOpacity": 40,
             "showPoints": "never",
             "stacking": {
-              "mode": "normal",
-              "group": "A"
+              "mode": "none"
             },
             "thresholdsStyle": {
               "mode": "line"
@@ -482,15 +481,9 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "전체 호출"
+              "options": "429 (한도 초과)"
             },
             "properties": [
-              {
-                "id": "custom.stacking",
-                "value": {
-                  "mode": "none"
-                }
-              },
               {
                 "id": "custom.fillOpacity",
                 "value": 0
@@ -500,20 +493,10 @@
                 "value": 2
               },
               {
-                "id": "custom.lineStyle",
-                "value": {
-                  "fill": "dash",
-                  "dash": [
-                    8,
-                    6
-                  ]
-                }
-              },
-              {
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "text"
+                  "fixedColor": "red"
                 }
               }
             ]
@@ -556,21 +539,6 @@
                 }
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "429"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "red"
-                }
-              }
-            ]
           }
         ]
       },
@@ -596,8 +564,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (status) (increase(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\"}[2m]))",
-          "legendFormat": "{{status}}"
+          "expr": "sum by (client_name) (max_over_time(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\"}[2m]) - min_over_time(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\"}[2m]))",
+          "legendFormat": "{{client_name}}"
         },
         {
           "refId": "C",
@@ -605,8 +573,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\"}[2m])) or vector(0)",
-          "legendFormat": "전체 호출"
+          "expr": "sum(increase(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\",status=\"429\"}[2m])) or vector(0)",
+          "legendFormat": "429 (한도 초과)"
         },
         {
           "refId": "B",
