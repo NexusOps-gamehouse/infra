@@ -1,19 +1,13 @@
-import { getPosts } from '../lib/http.js';
-import { getAuthHeader } from '../lib/auth.js';
-import { check, sleep } from 'k6';
+import s1 from '../scenarios/s1-list-posts.js';
+import s2 from '../scenarios/s2-post-detail.js';
 
 export const options = {
-  vus: 1,
-  duration: '10s',
+  stages: [
+    { duration: '1m', target: 5 },
+  ],
 };
 
 export default function () {
-  const params = getAuthHeader();
-  const res = getPosts(params);
-
-  check(res, {
-    'status is 200': (r) => r.status === 200,
-  });
-
-  sleep(1);
+  s1();
+  s2();
 }
