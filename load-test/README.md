@@ -130,3 +130,38 @@ docker compose --env-file .env.local \
 `reset.sh` 가 JSON 까지 지우는 이유: DB 만 비우고 `post-ids.json` 을 남기면 없는 PK 를 가리키게 되고,
 그 상태로 회차를 돌리면 시나리오 2·4 가 전부 404 를 받는다. **4xx 는 실패로 세지 않으므로 회차는
 끝까지 정상으로 돌고 결과만 무의미해진다.**
+
+## A파트 실행 및 검증 내역 (로컬 검증 완료)
+
+### 1. 서비스 및 DB 구동
+백엔드 및 PostgreSQL 컨테이너를 구동하여 JPA를 통한 DB 테이블 자동 생성을 진행합니다.
+
+```bash
+cd infra
+
+# 백엔드 및 의존성 서비스(PostgreSQL, RabbitMQ) 구동
+docker compose -f docker-compose.yml -f docker-compose.local.yml --env-file .env.local up -d backend
+```
+### 2. 부하 테스트 데이터 시딩
+   scale.json 스펙(계정 600, 게시글 300, 신청 1000) 기준으로 테스트 데이터 및 사전 토큰을 발급합니다.
+```bash
+cd load-test
+LT_DB_PASSWORD=local-duo-password ./seed/generate.sh
+```
+### 3. 사전 설계 가정 검증 (Preflight)
+응답 크기, Actuator 라벨, SLO 히스토그램 버킷 동작 여부를 실측 검증했습니다.
+```bash
+./preflight/response-size.sh       # PostDto 크기 측정 (평균 1039B)
+./preflight/actuator-labels.sh     # G1 GC, URI Template 정상 묶임 확인
+./preflight/histogram-buckets.sh   # SLO 응답시간 버킷 경계(0.05s~5.0s) 정상
+```
+### 4. 상시 데이터 정리 잡 (Cleanup Daemon)
+부하 테스트 중 생성되는 런타임 데이터 오염 방지를 위해 별도 터미널에서 실행합니다.
+```bash
+LT_DB_PASSWORD=local-duo-password ./cleanup/steady-state.sh
+```
+### 5. k6 시나리오 실행 (B파트 작업 대기)
+A파트 인프라 검증이 완료되었으며, B파트의 메인 시나리오 스크립트(.js) 작성 완료 후 실행을 시작합니다.
+```bash
+BASE_URL=http://localhost:8080 k6 run k6/<시나리오_파일명>.js
+```
