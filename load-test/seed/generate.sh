@@ -39,11 +39,18 @@ BASE_URL="${BASE_URL:-http://localhost:8080}"
 LT_PASSWORD="${LT_PASSWORD:-LoadTest!2026}"   # 부하용 계정 공통 비밀번호
 LOGIN_CONCURRENCY="${LOGIN_CONCURRENCY:-4}"   # 토큰 발급 병렬도. BCrypt 는 CPU 바운드다
 
-# 기대 규모. 숫자를 여기에 적지 않는다 — load-test/scale.json 이 유일한 출처이고
+# 기대 규모. 숫자를 여기에 적지 않는다 — load-test/scale*.json 이 유일한 출처이고
 # k6/lib/config.js 의 SEED 도 같은 파일을 읽는다. 한쪽만 고치는 사고를 막는다.
-# 스모크처럼 작게 돌릴 때는 값을 고치지 말고 파일을 갈아끼운다.
-#   SCALE_FILE=../scale.smoke.json ./generate.sh
-SCALE_FILE="${SCALE_FILE:-${SCRIPT_DIR}/../scale.json}"
+#
+# 작게 돌릴 때는 값을 고치지 말고 프로파일을 바꾼다.
+#   ./generate.sh              → scale.json        (계정 600 · 글 300 · 신청 1,000)
+#   SCALE=smoke ./generate.sh  → scale.smoke.json  (5 · 10 · 30)
+#
+# ⚠️ 경로가 아니라 '이름'을 받는다.
+#    상대경로를 받으면 bash 는 실행 위치(CWD) 기준으로 풀고 k6 의 open() 은
+#    파일 위치 기준으로 풀어서, 같은 문자열이 양쪽에서 다른 파일을 가리킨다.
+#    이름으로 받으면 어디서 실행하든 같은 파일이 된다.
+SCALE_FILE="${SCALE_FILE:-${SCRIPT_DIR}/../scale${SCALE:+.${SCALE}}.json}"
 
 require() {
   command -v "$1" >/dev/null 2>&1 || { echo "필요한 명령이 없다: $1" >&2; exit 1; }
