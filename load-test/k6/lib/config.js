@@ -151,7 +151,7 @@ export const ENDPOINT = {
   },
 };
 
-// 편의용 — 문서(2절 비중표)와 대조하기 쉬우라고 따로 뽑아 둔다.
+// 편의용 — 위 ENDPOINT 에서 rps 만 따로 뽑아 둔다. 비중을 한눈에 보려고.
 export const BASE_RPS = Object.fromEntries(
   Object.entries(ENDPOINT).map(([k, v]) => [k, v.rps]),
 );
@@ -298,6 +298,23 @@ export const VUS = {
 // ---------------------------------------------------------------------------
 export const IS_LOCAL = __ENV.LOCAL === '1';
 
+// 축소를 끄는 탈출구 — run.sh --full (또는 LOCAL_FULL=1).
+//
+// ⚠️ 로컬에서 AWS 규모로 돌면 위 실측대로 회차가 아니라 '대상을 죽이는 실험'
+//    이 된다. 그래도 남겨 두는 이유는 두 가지다.
+//      · OOM 이 고쳐졌는지 확인하려면 고쳐진 뒤 한 번은 전체 규모로 돌려야 한다
+//      · mem_limit 을 올린 compose 로 어디까지 버티는지 볼 때 쓴다
+//    즉 '판정' 이 아니라 '한계 확인' 용이다. 결과는 여전히 인용하지 않는다
+//    (Rosetta 에뮬레이션은 그대로다).
+//
+// LOCAL 을 0 으로 속이는 방법도 있지만 그건 쓰지 않는다. LOCAL=0 으로 두면
+// 요약 하단의 '로컬 실행이다' 경고까지 같이 사라져서, 로컬 숫자가 정상 회차의
+// 결과인 것처럼 남는다. 여기서는 축소만 끄고 '로컬' 이라는 사실은 남긴다.
+export const LOCAL_FULL = __ENV.LOCAL_FULL === '1';
+
+// 실제로 축소가 걸리는 조건. 아래 배율·VU·창은 전부 이 값만 본다.
+export const IS_REDUCED = IS_LOCAL && !LOCAL_FULL;
+
 /** '1/27' 같은 분수 표기를 받는다. 0.037 로 적으면 정수 조건에서 걸린다. */
 function parseCap(raw, fallback) {
   if (!raw) return fallback;
@@ -345,12 +362,15 @@ function windowFor(cap) {
   );
 }
 
-export const RATE_WINDOW_SEC = IS_LOCAL ? windowFor(LOCAL_CAP) : 3;
+// ⚠️ IS_LOCAL 이 아니라 IS_REDUCED 를 본다. --full 로 축소를 끄면 창도 운영과
+//    같은 3s 로 돌아가야 한다. 여기만 27s 로 남으면 도착률은 맞지만 요청이
+//    27초에 한 번씩 뭉쳐 나가서, 같은 135 RPS 라도 전혀 다른 부하가 된다.
+export const RATE_WINDOW_SEC = IS_REDUCED ? windowFor(LOCAL_CAP) : 3;
 export const RATE_WINDOW = `${RATE_WINDOW_SEC}s`;
 
-/** 로컬이면 배율을 상한으로 깎는다. 0(Cool-down)은 그대로 둔다. */
+/** 축소 모드면 배율을 상한으로 깎는다. 0(Cool-down)은 그대로 둔다. */
 export function capMultiplier(m) {
-  return IS_LOCAL ? Math.min(m, LOCAL_CAP) : m;
+  return IS_REDUCED ? Math.min(m, LOCAL_CAP) : m;
 }
 
 /**
@@ -361,7 +381,7 @@ export function capMultiplier(m) {
  */
 export function vusFor(key) {
   const localKey = { roundA: 'localA', roundBC: 'localBC' }[key];
-  return IS_LOCAL && localKey ? VUS[localKey] : VUS[key];
+  return IS_REDUCED && localKey ? VUS[localKey] : VUS[key];
 }
 
 /**
@@ -373,10 +393,29 @@ export function vusFor(key) {
  *    이걸 파일로 떨구고 run.sh 는 그 파일을 그대로 옮겨 담기만 한다.
  */
 export function loadModeInfo(key) {
-  if (!IS_LOCAL || !{ roundA: 1, roundBC: 1 }[key]) return { reduced: false };
+  // 축소가 걸리는 회차는 A·B·C 뿐이다. 스모크와 회차 D 는 원래 작아서
+  // 축소 대상이 아니므로, --full 을 줘도 달라지는 것이 없다.
+  if (!IS_LOCAL || !{ roundA: 1, roundBC: 1 }[key]) {
+    return { reduced: false, localFull: false };
+  }
   const v = vusFor(key);
+
+  // 로컬인데 축소를 껐다. reduced:false 로만 남기면 manifest 만 봤을 때
+  // AWS 회차와 구분이 안 된다 — 별도 필드로 못박는다.
+  if (LOCAL_FULL) {
+    return {
+      reduced: false,
+      localFull: true,
+      cap: 1,
+      window: RATE_WINDOW,
+      approxRps: PEAK_RPS,
+      vus: v,
+    };
+  }
+
   return {
     reduced: true,
+    localFull: false,
     cap: LOCAL_CAP,
     window: RATE_WINDOW,
     approxRps: Math.round(PEAK_RPS * LOCAL_CAP),
@@ -384,12 +423,23 @@ export function loadModeInfo(key) {
   };
 }
 
-/** 요약·로그에 한 줄로 남긴다. 없으면 나중에 정상 회차로 착각한다. */
+/**
+ * 요약·로그에 한 줄로 남긴다. 없으면 나중에 정상 회차로 착각한다.
+ *
+ * 꼬리말까지 여기서 만든다. 부르는 쪽이 '완주 검증용' 같은 문구를 붙이면
+ * --full 회차에도 그게 따라붙어 요약이 사실과 달라진다.
+ */
 export function loadModeNote(key) {
   const i = loadModeInfo(key);
+  if (i.localFull) {
+    return `로컬 · 축소 해제(--full) — AWS 규모 그대로 약 ${i.approxRps} RPS · ` +
+      `창 ${i.window} · VU ${i.vus.preAllocatedVUs}/${i.vus.maxVUs} — ` +
+      '한계 확인용. 완주하지 못할 수 있다';
+  }
   if (!i.reduced) return null;
   return `로컬 축소 — 배율 상한 ${i.cap.toFixed(3)} (약 ${i.approxRps} RPS) · ` +
-    `창 ${i.window} · VU ${i.vus.preAllocatedVUs}/${i.vus.maxVUs}`;
+    `창 ${i.window} · VU ${i.vus.preAllocatedVUs}/${i.vus.maxVUs} — ` +
+    '완주 검증용. 판정 근거가 아니다';
 }
 
 /**

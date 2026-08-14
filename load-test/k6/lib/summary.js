@@ -138,8 +138,10 @@ function render(data) {
 
   // 축소 모드로 돈 회차를 정상 회차로 착각하는 것을 막는다. 숫자만 보면
   // 구분이 안 되고, 구분이 안 되면 언젠가 이 결과가 보고서로 샌다.
+  // 꼬리말('완주 검증용' 등)은 config.js 가 모드에 맞춰 붙인다 — 축소와
+  // --full 은 남길 말이 다르다.
   const mode = loadModeNote(MODE_KEY);
-  if (mode) L.push(` ⚠ ${mode} — 완주 검증용. 판정 근거가 아니다`);
+  if (mode) L.push(` ⚠ ${mode}`);
 
   L.push(BAR);
 
@@ -306,7 +308,12 @@ export function handleSummary(data) {
     // 축소 모드로 돌았다면 '무엇으로 돌았는지' 를 기계가 읽을 형태로 남긴다.
     // run.sh 가 이 파일을 manifest.json 에 그대로 옮겨 담는다 — bash 가 기본값을
     // 다시 계산하지 않게 하려는 것이다(config.js 의 loadModeInfo 주석 참조).
-    ...(mode.reduced ? { [`${DIR}/load-mode.json`]: JSON.stringify(mode, null, 2) } : {}),
+    //
+    // localFull(로컬인데 --full 로 축소를 끈 회차)도 같이 남긴다. 축소가 아니니
+    // reduced 는 false 지만, 그 사실이야말로 manifest 에 있어야 하는 것이다.
+    ...(mode.reduced || mode.localFull
+      ? { [`${DIR}/load-mode.json`]: JSON.stringify(mode, null, 2) }
+      : {}),
 
     stdout: `\n${text}\n`,
 

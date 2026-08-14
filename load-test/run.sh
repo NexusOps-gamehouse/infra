@@ -31,7 +31,7 @@ RESULTS_ROOT="${SCRIPT_DIR}/results"
 # ---------------------------------------------------------------------------
 usage() {
   cat >&2 <<'EOF'
-사용법: ./run.sh <회차> [--raw] [-- k6 에 그대로 넘길 인자...]
+사용법: ./run.sh <회차> [--raw] [--full] [--queries] [-- k6 에 그대로 넘길 인자...]
 
   smoke      경로 검증. 성능 측정 아님
   round-a    Load    — 유일한 판정 근거
@@ -41,12 +41,18 @@ usage() {
 
   --raw      요청 단위 원시 데이터도 남긴다 (raw.json.gz)
              회차 A 기준 압축 전 400MB 대. 회차 B·C 를 파고들 때만 쓴다.
+  --full     로컬 축소를 끈다. AWS 규모(135 RPS · VU 300/400)로 돌린다.
+             회차 A·B·C 에만 의미가 있다. 실측상 완주하지 못한다 — 한계 확인용.
+  --queries  회차 동안 DB 가 받은 쿼리 수를 센다 (queries.txt · queries.json).
+             N+1 판별용. 재는 동안 다른 트래픽이 없어야 한다.
 
 예)
   ./run.sh smoke
   SCALE=smoke ./run.sh smoke
   ./run.sh round-a
   ./run.sh round-d --raw
+  ./run.sh round-d --queries          # N+1 판별
+  ./run.sh round-a --full             # 로컬에서 AWS 규모로 (죽는 지점을 본다)
   ./run.sh round-a -- --http-debug=full
 EOF
   exit 1
@@ -66,10 +72,14 @@ case "${ROUND}" in
 esac
 
 RAW=0
+FULL=0
+QUERIES=0
 K6_EXTRA=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --raw) RAW=1; shift ;;
+    --full) FULL=1; shift ;;
+    --queries) QUERIES=1; shift ;;
     --) shift; K6_EXTRA=("$@"); break ;;
     *) echo "모르는 인자: $1" >&2; usage ;;
   esac
@@ -157,8 +167,15 @@ echo "결과   ${RESULT_DIR}"
 
 # 로컬 축소 모드 — k6 쪽 config.js 가 LOCAL=1 을 보고 VU 와 배율을 깎는다.
 # 여기서도 찍는 이유는, 회차가 끝난 뒤가 아니라 '시작 전에' 알아야 하기 때문이다.
+#
+# --full 은 그 축소만 끈다. LOCAL 자체는 1 로 남긴다 — 0 으로 속이면 요약
+# 하단의 '로컬 실행이다' 경고까지 사라져서, 로컬 숫자가 정상 회차 결과처럼
+# 남는다(config.js 의 LOCAL_FULL 주석 참조).
 REDUCED=0
-if [[ "${LOCAL}" -eq 1 ]] && [[ "${ROUND}" == round-a || "${ROUND}" == round-b || "${ROUND}" == round-c ]]; then
+REDUCIBLE=0
+[[ "${ROUND}" == round-a || "${ROUND}" == round-b || "${ROUND}" == round-c ]] && REDUCIBLE=1
+
+if [[ "${LOCAL}" -eq 1 && "${REDUCIBLE}" -eq 1 && "${FULL}" -eq 0 ]]; then
   REDUCED=1
   # ⚠️ 기본값을 여기에 적지 않는다. 상한의 유일한 출처는 config.js 의 LOCAL_CAP 이고,
   #    bash 에 숫자를 한 번 더 적으면 한쪽만 고쳐져 배너가 거짓말을 한다
@@ -167,8 +184,45 @@ if [[ "${LOCAL}" -eq 1 ]] && [[ "${ROUND}" == round-a || "${ROUND}" == round-b |
   echo "⚠ 로컬 축소 모드 — 배율 상한 ${LOCAL_CAP:-기본값(config.js)} · VU 를 로컬 프로파일로 낮춘다"
   echo "  AWS 값(VU 300~800)을 로컬에 넣으면 컨테이너가 30초에 OOM 된다."
   echo "  이 회차의 목적은 판정이 아니라 '스크립트가 완주하는가' 다."
+  echo "  전체 규모로 돌려보려면 --full (완주는 못 한다)."
+
+elif [[ "${LOCAL}" -eq 1 && "${REDUCIBLE}" -eq 1 && "${FULL}" -eq 1 ]]; then
+  echo "⚠ 로컬 · 축소 해제(--full) — AWS 규모 그대로 돌린다"
+  echo "  실측(2026-08-13): 45 RPS 는 46초, 15 RPS 는 10분 42초에 대상이 OOM 됐다."
+  echo "  135 RPS 면 1분 안에 죽는다고 봐야 한다. 그래도 남기는 값은 '언제 죽었나' 다."
+  echo "  죽은 뒤에는 summary 의 '대상에 연결되지 않았다' 절을 먼저 읽는다."
+
+  # 파일 디스크립터 — 여기서 막히면 서버가 아니라 러너가 한계다.
+  # macOS 기본값이 256 이라 VU 400 은 시작하자마자 'too many open files' 가 난다.
+  # 그 실패는 대상 병목처럼 보이지 않지만, 결과는 똑같이 무의미해진다.
+  NOFILE=$(ulimit -n 2>/dev/null || echo 0)
+  if [[ "${NOFILE}" != "unlimited" && "${NOFILE}" -lt 4096 ]]; then
+    echo ""
+    echo "  ⚠ ulimit -n 이 ${NOFILE} 이다. VU 300~800 에는 모자란다."
+    echo "    같은 셸에서 먼저 올린다:  ulimit -n 10240"
+  fi
+
+  # 확인을 한 번 받는다. --raw 처럼 결과물만 바뀌는 플래그가 아니라
+  # '대상을 죽이는' 플래그라, 손에 익어 무심코 붙는 일이 없어야 한다.
+  if [[ "${LT_FULL_CONFIRM:-}" != "1" ]]; then
+    if [[ -t 0 ]]; then
+      echo ""
+      echo "  계속하려면 Enter, 중단은 Ctrl-C. (LT_FULL_CONFIRM=1 로 건너뛴다)"
+      read -r
+    else
+      echo "  (비대화 실행 — 확인 없이 진행한다)"
+    fi
+  fi
+
 elif [[ "${LOCAL}" -eq 1 ]]; then
   echo "⚠ 로컬 — 성능 판정에 쓰지 않는다"
+  [[ "${FULL}" -eq 1 ]] && \
+    echo "  --full 은 이 회차에 영향이 없다 — 축소는 회차 A·B·C 에만 걸린다"
+fi
+
+if [[ "${LOCAL}" -eq 0 && "${FULL}" -eq 1 ]]; then
+  echo "⚠ --full 은 로컬 전용이다. 대상이 원격이라 이미 전체 규모다 — 무시한다"
+  FULL=0
 fi
 echo ""
 
@@ -189,6 +243,8 @@ K6_ARGS=(
   #    이 값 하나로 VU 상한과 배율이 갈리는데, 시스템 env 상속에 기대면
   #    (k6 inspect 는 실제로 상속하지 않는다) 조용히 AWS 값으로 도는 사고가 난다.
   --env "LOCAL=${LOCAL}"
+  # LOCAL 과 같은 이유로 못박는다. 이 값 하나로 축소 여부가 갈린다.
+  --env "LOCAL_FULL=${FULL}"
 )
 [[ -n "${LOCAL_CAP:-}" ]] && K6_ARGS+=(--env "LOCAL_CAP=${LOCAL_CAP}")
 
@@ -200,6 +256,27 @@ if [[ "${RAW}" -eq 1 ]]; then
 fi
 
 [[ ${#K6_EXTRA[@]} -gt 0 ]] && K6_ARGS+=("${K6_EXTRA[@]}")
+
+# ---------------------------------------------------------------------------
+# 쿼리 수 측정 — 회차 '직전' 에 카운터를 찍는다.
+#
+# 하위 프로세스로 부른다(source 하지 않는다). db.sh 는 psql 이 없으면 그 자리에서
+# exit 1 하는데, source 로 들여오면 그 exit 이 run.sh 를 죽인다 — 쿼리 측정을
+# 붙였다는 이유로 회차 자체가 안 도는 것은 말이 안 된다.
+#
+# 여기서 실패하면 회차를 시작하지 않는다. DB 에 못 붙는 것을 18분 뒤에 아는
+# 것보다 지금 아는 것이 낫다.
+# ---------------------------------------------------------------------------
+PGSTAT_BEFORE="${RESULT_DIR}/pgstat-before.json"
+if [[ "${QUERIES}" -eq 1 ]]; then
+  if ! "${SCRIPT_DIR}/query-count.sh" before "${PGSTAT_BEFORE}"; then
+    echo "" >&2
+    echo "쿼리 수 측정을 준비하지 못했다. --queries 없이 돌리거나 LT_DB_* 를 확인한다." >&2
+    exit 1
+  fi
+  echo "쿼리 수를 센다 — 재는 동안 다른 트래픽이 없어야 한다 (cleanup 잡 포함)"
+  echo ""
+fi
 
 STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 START_EPOCH=$(date +%s)
@@ -222,6 +299,24 @@ ELAPSED=$(( $(date +%s) - START_EPOCH ))
 CONN_ERRORS=0
 if [[ -f "${RESULT_DIR}/summary.json" ]]; then
   CONN_ERRORS=$(jq -r '.metrics.lt_conn_errors.values.count // 0' "${RESULT_DIR}/summary.json")
+fi
+
+# ---------------------------------------------------------------------------
+# 쿼리 수 측정 — 회차가 끝나면 뺀다.
+#
+# 요청 수는 k6 가 센 http_reqs 를 그대로 쓴다. 여기서 도착률 × 시간으로
+# 다시 계산하지 않는다 — dropped_iterations 가 있으면 그 둘이 다르고,
+# 하필 그 차이가 큰 회차가 '요청당 쿼리 수' 를 가장 알고 싶은 회차다.
+#
+# 여기서 실패해도 회차는 살린다. 회차 결과가 이미 나와 있는데 부가 측정
+# 하나 때문에 manifest 를 못 남기면 안 된다.
+# ---------------------------------------------------------------------------
+if [[ "${QUERIES}" -eq 1 ]]; then
+  REQS=$(jq -r '.metrics.http_reqs.values.count // 0 | floor' "${RESULT_DIR}/summary.json" 2>/dev/null || echo 0)
+  echo ""
+  "${SCRIPT_DIR}/query-count.sh" after "${PGSTAT_BEFORE}" \
+    --reqs "${REQS}" --out "${RESULT_DIR}" \
+    || echo "⚠ 쿼리 수 측정에 실패했다 — 회차 결과 자체는 유효하다" >&2
 fi
 
 case "${EXIT_CODE}" in
@@ -250,9 +345,26 @@ GIT_COMMIT=$(git -C "${SCRIPT_DIR}" rev-parse --short HEAD 2>/dev/null || echo "
 LOAD_MODE_FILE="${RESULT_DIR}/load-mode.json"
 if [[ -f "${LOAD_MODE_FILE}" ]]; then
   LOAD_JSON=$(cat "${LOAD_MODE_FILE}")
+elif [[ "${REDUCIBLE}" -eq 0 ]]; then
+  # 스모크와 회차 D 는 원래 작아서 축소 대상이 아니다. k6 가 파일을 안 쓰는 것이
+  # 정상이므로 '종료됐다' 고 적으면 안 된다 — 정상 회차에 사고 흔적을 남기게 된다.
+  LOAD_JSON=$(jq -nc '{reduced: false, localFull: false, cap: null,
+                       note: "축소 대상 회차가 아니다 (스모크·회차 D)"}')
 else
-  LOAD_JSON=$(jq -nc --argjson reduced "${REDUCED}" \
-    '{reduced: ($reduced == 1), cap: null, note: "k6 요약 이전에 종료 — 적용값 미상"}')
+  LOAD_JSON=$(jq -nc --argjson reduced "${REDUCED}" --argjson full "${FULL}" \
+    '{reduced: ($reduced == 1), localFull: ($full == 1), cap: null,
+      note: "k6 요약 이전에 종료 — 적용값 미상"}')
+fi
+
+# 쿼리 수는 요약만 담는다. 표 전체는 queries.json 에 있고, manifest 는
+# "이 회차가 무엇이었나" 를 1KB 로 말하는 파일이라 표를 넣으면 성격이 달라진다.
+QUERIES_JSON=null
+if [[ -f "${RESULT_DIR}/queries.json" ]]; then
+  QUERIES_JSON=$(jq -c '{
+      file: "queries.json",
+      requests, posts, totalScans, scansPerRequest,
+      top: [.tables[] | select(.scans > 0) | {table, perRequest, perItem}][:3]
+    }' "${RESULT_DIR}/queries.json")
 fi
 
 jq -n \
@@ -268,6 +380,7 @@ jq -n \
   --arg baseUrl "${BASE_URL}" \
   --argjson local "${LOCAL}" \
   --argjson load "${LOAD_JSON}" \
+  --argjson queries "${QUERIES_JSON}" \
   --argjson raw "${RAW}" \
   --arg scaleFile "$(basename "${SCALE_FILE}")" \
   --arg gitCommit "${GIT_COMMIT}" \
@@ -280,6 +393,7 @@ jq -n \
      exitCode: $exitCode, verdict: $verdict, connErrors: $connErrors,
      target: { baseUrl: $baseUrl, local: ($local == 1) },
      load: $load,
+     queries: $queries,
      seed: $seed[0], scaleFile: $scaleFile,
      raw: ($raw == 1),
      runner: { k6: $k6Version, host: $host, gitCommit: $gitCommit }
