@@ -3,6 +3,27 @@ services:
   backend:
     pull_policy: never
 
+    # 부하 테스트 회차를 로컬에서 '완주' 시키기 위한 상향. 운영값이 아니다.
+    #
+    # 공통 파일의 mem_limit 은 700m 이고 t3.small 기준으로 정한 값이다.
+    # 그런데 로컬에서 회차 A 를 돌리면 대상이 죽어 회차 자체가 성립하지 않는다.
+    # 실측(2026-08-13):
+    #   유휴 RSS 612MB / 700MB → 여유 88MB
+    #   회차 시작 14초 만에 한도 도달 → Serial GC 가 full GC 만 반복
+    #   → 처리량 45 → 18 RPS, p95 8초대, 46초에 cgroup OOM(exit 137)
+    #
+    # 로컬은 판정 환경이 아니라 스크립트 완주를 검증하는 곳이므로, 대상이
+    # 살아있게 두는 쪽이 목적에 맞다. 성능 수치는 어차피 AWS 회차에서 받는다.
+    #
+    # ⚠️ 1792m 을 넘기지 않는다. 그 이상이면 JVM 이 Serial 대신 G1 을 고르고,
+    #    그러면 로컬이 운영과 다른 GC 로 돌아 힙 그래프의 성격 자체가 달라진다.
+    #    (README 6절의 'Serial GC' 실측이 무효가 된다)
+    #
+    # JAVA_TOOL_OPTIONS 는 일부러 건드리지 않는다. 힙은 200m 그대로 두고
+    # 네이티브 여유만 준다 — 그래야 다음 회차에서 '힙이 부족한 것인지
+    # 네이티브가 부족했던 것인지' 가 갈린다.
+    mem_limit: 1500m
+
     environment:
       DB_URL: jdbc:postgresql://${LOCAL_DB_HOST}:${LOCAL_DB_PORT}/${LOCAL_DB_NAME}
       DB_USERNAME: ${LOCAL_DB_USERNAME}

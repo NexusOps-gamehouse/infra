@@ -154,7 +154,22 @@ echo "testid ${TESTID}"
 echo "대상   ${BASE_URL}"
 echo "규모   ${HAVE_PROFILE}  계정 $(jq -r '.accounts' "${META}") · 게시글 $(jq -r '.posts' "${META}")"
 echo "결과   ${RESULT_DIR}"
-[[ "${LOCAL}" -eq 1 ]] && echo "⚠ 로컬 — 성능 판정에 쓰지 않는다"
+
+# 로컬 축소 모드 — k6 쪽 config.js 가 LOCAL=1 을 보고 VU 와 배율을 깎는다.
+# 여기서도 찍는 이유는, 회차가 끝난 뒤가 아니라 '시작 전에' 알아야 하기 때문이다.
+REDUCED=0
+if [[ "${LOCAL}" -eq 1 ]] && [[ "${ROUND}" == round-a || "${ROUND}" == round-b || "${ROUND}" == round-c ]]; then
+  REDUCED=1
+  # ⚠️ 기본값을 여기에 적지 않는다. 상한의 유일한 출처는 config.js 의 LOCAL_CAP 이고,
+  #    bash 에 숫자를 한 번 더 적으면 한쪽만 고쳐져 배너가 거짓말을 한다
+  #    (실제로 1/9 로 돌면서 '0.3333' 이라고 찍은 적이 있다).
+  #    확정된 값은 회차 요약 헤더가 찍는다.
+  echo "⚠ 로컬 축소 모드 — 배율 상한 ${LOCAL_CAP:-기본값(config.js)} · VU 를 로컬 프로파일로 낮춘다"
+  echo "  AWS 값(VU 300~800)을 로컬에 넣으면 컨테이너가 30초에 OOM 된다."
+  echo "  이 회차의 목적은 판정이 아니라 '스크립트가 완주하는가' 다."
+elif [[ "${LOCAL}" -eq 1 ]]; then
+  echo "⚠ 로컬 — 성능 판정에 쓰지 않는다"
+fi
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -170,7 +185,12 @@ K6_ARGS=(
   --summary-trend-stats "avg,min,med,p(95),p(99),max"
   --tag "testid=${TESTID}"
   --tag "round=${ROUND}"
+  # ⚠️ LOCAL 은 프로세스 환경변수로도 넘어가지만 --env 로 못박는다.
+  #    이 값 하나로 VU 상한과 배율이 갈리는데, 시스템 env 상속에 기대면
+  #    (k6 inspect 는 실제로 상속하지 않는다) 조용히 AWS 값으로 도는 사고가 난다.
+  --env "LOCAL=${LOCAL}"
 )
+[[ -n "${LOCAL_CAP:-}" ]] && K6_ARGS+=(--env "LOCAL_CAP=${LOCAL_CAP}")
 
 if [[ "${RAW}" -eq 1 ]]; then
   # .gz 로 끝나면 k6 가 압축해서 쓴다. 회차 A 는 압축 전 400MB 대라
@@ -189,6 +209,7 @@ START_EPOCH=$(date +%s)
 set +e
 RESULT_DIR="${RESULT_DIR}" TESTID="${TESTID}" ROUND="${ROUND}" \
 BASE_URL="${BASE_URL}" LOCAL="${LOCAL}" SEED_DATA_DIR="${SEED_DIR}" \
+LOCAL_CAP="${LOCAL_CAP:-}" \
   k6 "${K6_ARGS[@]}" "${K6_DIR}/${SCRIPT}"
 EXIT_CODE=$?
 set -e
@@ -221,6 +242,19 @@ esac
 # ---------------------------------------------------------------------------
 GIT_COMMIT=$(git -C "${SCRIPT_DIR}" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
+# 축소 모드 정보는 k6 가 떨군 것을 그대로 쓴다. 여기서 다시 계산하지 않는다 —
+# 기본값은 config.js 에만 있고 bash 는 그 값을 모른다.
+# 파일이 없으면 k6 가 요약을 만들기 전에 죽은 것이다(setup 실패 등). 그때는
+# '축소였는지' 만 배너 기준으로 적고 상한은 모른다고 남긴다. 추측해서 채우면
+# 나중에 그 숫자를 사실로 읽게 된다.
+LOAD_MODE_FILE="${RESULT_DIR}/load-mode.json"
+if [[ -f "${LOAD_MODE_FILE}" ]]; then
+  LOAD_JSON=$(cat "${LOAD_MODE_FILE}")
+else
+  LOAD_JSON=$(jq -nc --argjson reduced "${REDUCED}" \
+    '{reduced: ($reduced == 1), cap: null, note: "k6 요약 이전에 종료 — 적용값 미상"}')
+fi
+
 jq -n \
   --arg testid "${TESTID}" \
   --arg round "${ROUND}" \
@@ -233,6 +267,7 @@ jq -n \
   --argjson connErrors "${CONN_ERRORS%.*}" \
   --arg baseUrl "${BASE_URL}" \
   --argjson local "${LOCAL}" \
+  --argjson load "${LOAD_JSON}" \
   --argjson raw "${RAW}" \
   --arg scaleFile "$(basename "${SCALE_FILE}")" \
   --arg gitCommit "${GIT_COMMIT}" \
@@ -244,6 +279,7 @@ jq -n \
      startedAt: $startedAt, finishedAt: $finishedAt, elapsedSec: $elapsedSec,
      exitCode: $exitCode, verdict: $verdict, connErrors: $connErrors,
      target: { baseUrl: $baseUrl, local: ($local == 1) },
+     load: $load,
      seed: $seed[0], scaleFile: $scaleFile,
      raw: ($raw == 1),
      runner: { k6: $k6Version, host: $host, gitCommit: $gitCommit }

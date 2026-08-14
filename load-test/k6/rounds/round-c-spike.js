@@ -8,7 +8,7 @@
 // 여기서 p95 가 안 돌아오면 고갈된 자원이 반환되지 않는다는 뜻이다.
 // ===========================================================================
 
-import { MULTIPLIER, VUS, SYSTEM_TAGS, assertAccountsCoverVUs } from '../lib/config.js';
+import { MULTIPLIER, vusFor, SYSTEM_TAGS, assertAccountsCoverVUs } from '../lib/config.js';
 import { assertSeed } from '../lib/data.js';
 import { rampingScenarios } from '../options/scenarios.js';
 import { thresholds } from '../options/thresholds.js';
@@ -36,7 +36,7 @@ export const options = {
       { duration: '10s', multiplier: MULTIPLIER.OFF_PEAK },  // 급락 →  45
       { duration: '2m', multiplier: MULTIPLIER.OFF_PEAK },   // 회복 관측
     ],
-    vus: VUS.roundBC,
+    vus: vusFor('roundBC'),   // 로컬이면 축소판(VUS.localBC)
   }),
   // 판정 회차가 아니므로 중단시키지 않는다. 끝까지 돌려 회복 구간을 본다.
   thresholds: thresholds({ abortOnFail: false }),

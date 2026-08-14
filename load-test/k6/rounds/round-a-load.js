@@ -12,7 +12,7 @@
 //   k6 run k6/rounds/round-a-load.js
 // ===========================================================================
 
-import { MULTIPLIER, VUS, assertAccountsCoverVUs } from '../lib/config.js';
+import { MULTIPLIER, vusFor, assertAccountsCoverVUs } from '../lib/config.js';
 import { SYSTEM_TAGS } from '../lib/config.js';
 import { assertSeed } from '../lib/data.js';
 import { rampingScenarios } from '../options/scenarios.js';
@@ -41,7 +41,9 @@ export const options = {
       { duration: '15m', multiplier: MULTIPLIER.PEAK },      // Sustained 135 ← 판정
       { duration: '30s', multiplier: 0 },                    // Cool-down
     ],
-    vus: VUS.roundA,
+    // 로컬이면 축소판(VUS.localA)으로 갈아끼운다. AWS 값(300/400)을 로컬에
+    // 넣으면 컨테이너가 30초에 OOM 된다 — config.js 의 IS_LOCAL 주석 참조.
+    vus: vusFor('roundA'),
   }),
   thresholds: thresholds(),
 };

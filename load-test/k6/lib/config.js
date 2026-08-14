@@ -190,15 +190,15 @@ export const MULTIPLIER = {
  * rate 162 / 3s 와 rate 54 / 1s 는 같은 도착률이므로 큰 시나리오도 손해가 없다.
  */
 export function arrivalRate(scenarioKey, multiplier) {
-  const target = ENDPOINT[scenarioKey].rps * multiplier * 3;
+  const target = ENDPOINT[scenarioKey].rps * multiplier * RATE_WINDOW_SEC;
   const rate = Math.round(target);
   if (Math.abs(target - rate) > 1e-9) {
     throw new Error(
-      `[config] ${scenarioKey} × ${multiplier} 가 3s 단위 정수로 떨어지지 않는다 (${target}). ` +
-      `MULTIPLIER 에 n/3 이 아닌 값을 추가했는지 확인할 것.`,
+      `[config] ${scenarioKey} × ${multiplier} 가 ${RATE_WINDOW_SEC}s 단위 정수로 떨어지지 않는다 (${target}). ` +
+      `배율의 분모가 창(window)을 나누어야 한다 — MULTIPLIER 나 LOCAL_CAP 을 확인할 것.`,
     );
   }
-  return { rate, timeUnit: '3s' };
+  return { rate, timeUnit: RATE_WINDOW };
 }
 
 /**
@@ -271,7 +271,126 @@ export const VUS = {
   roundA: { preAllocatedVUs: 300, maxVUs: 400 },
   roundBC: { preAllocatedVUs: 600, maxVUs: 800 },
   roundD: { preAllocatedVUs: 5, maxVUs: 10 },
+
+  // 로컬 축소판 — 아래 IS_LOCAL 참조.
+  //
+  // VU 상한은 '동시에 조립 중인 목록 응답 수' 의 상한이기도 하다. 목록 하나가
+  // 302KB 라서 이 값이 그대로 메모리 압력이 된다. 15 RPS 면 응답이 0.5초일 때
+  // 8 VU 면 충분하고, 2초로 늘어져도 30 이면 된다. 40 은 그 위의 안전판이다.
+  localA: { preAllocatedVUs: 20, maxVUs: 40 },
+  localBC: { preAllocatedVUs: 30, maxVUs: 60 },
 };
+
+// ---------------------------------------------------------------------------
+// 로컬 축소 모드
+//
+// ⚠️ 위 roundA / roundBC 는 AWS 값이다. 로컬에 그대로 넣으면 회차가 아니라
+//    러너와 대상을 동시에 죽이는 실험이 된다. 실측(2026-08-13):
+//      · 컨테이너 유휴 RSS 481MB / mem_limit 700MB → 여유 220MB
+//      · VU 가 402 까지 오르면 Tomcat 이 200 스레드로 받고, 스레드마다 300건
+//        목록(약 302KB)을 힙 200MB 안에서 조립한다
+//      → 회차 시작 30초에 cgroup OOM(exit 137). 회차 자체가 성립하지 않는다
+//
+//    그래서 로컬은 '판정' 이 아니라 '완주 검증' 만 한다. 목표 135 RPS 는
+//    내리지 않는다 — 내리는 것은 로컬 회차의 투입량이지 목표가 아니다.
+//
+// LOCAL 은 run.sh 가 BASE_URL 을 보고 넘긴다(localhost/127.0.0.1 이면 1).
+// ---------------------------------------------------------------------------
+export const IS_LOCAL = __ENV.LOCAL === '1';
+
+/** '1/27' 같은 분수 표기를 받는다. 0.037 로 적으면 정수 조건에서 걸린다. */
+function parseCap(raw, fallback) {
+  if (!raw) return fallback;
+  const frac = String(raw).match(/^\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*$/);
+  const v = frac ? Number(frac[1]) / Number(frac[2]) : Number(raw);
+  if (!isFinite(v) || v <= 0) {
+    throw new Error(`[config] LOCAL_CAP 값이 이상하다: '${raw}' (예: 1/27, 1/9, 0.5)`);
+  }
+  return v;
+}
+
+// 로컬에서 허용할 배율 상한. 기본 1/27 = 5 RPS.
+//
+// ⚠️ 낮은 이유는 로컬이 느려서가 아니라 대상이 '요청 수에 비례해' 죽기 때문이다.
+//    실측(2026-08-13, platform: linux/amd64 에뮬레이션):
+//      요청 1건마다 JVM 밖에서 약 83KB(커넥션 재사용 기준)가 남는다.
+//      응답 크기·쿼리 수와 무관하고 요청 수에만 비례한다.
+//      → 45 RPS: 46초에 OOM / 15 RPS: 10분 42초에 OOM
+//    18분 30초를 완주하려면 남는 양이 여유 메모리보다 작아야 한다.
+//      5 RPS × 1,110초 × 83KB ≈ 460MB  <  여유 약 950MB (mem_limit 1500m)
+//
+//    즉 이 값은 '로컬 성능' 이 아니라 '누수 속도 × 회차 길이' 가 정한다.
+//    누수가 고쳐지거나 메모리를 더 주면 LOCAL_CAP=1/9 처럼 올려서 준다.
+export const LOCAL_CAP = parseCap(__ENV.LOCAL_CAP, 1 / 27);
+
+// ---------------------------------------------------------------------------
+// 도착률의 '창(window)'
+//
+// k6 의 rate 는 정수만 받는다. 그래서 배율을 곱한 값이 정수로 떨어지도록 창
+// 길이를 잡는다 — rate 54 / 27s 와 rate 2 / 1s 는 같은 도착률이다.
+//
+// 운영은 배율이 전부 n/3 이라 3초로 고정이다. 로컬은 상한을 얼마로 주느냐에
+// 따라 필요한 창이 달라지므로(1/9 → 9s, 1/27 → 27s) 여기서 직접 찾는다.
+// 상수로 박아두면 LOCAL_CAP 을 바꿀 때마다 같이 고쳐야 하고, 안 고치면
+// arrivalRate() 가 실패해서 회차가 아예 안 뜬다.
+// ---------------------------------------------------------------------------
+function windowFor(cap) {
+  const rpsList = Object.values(ENDPOINT).map((ep) => ep.rps);
+  for (let w = 1; w <= 300; w++) {
+    if (rpsList.every((r) => Math.abs(r * cap * w - Math.round(r * cap * w)) < 1e-9)) return w;
+  }
+  throw new Error(
+    `[config] LOCAL_CAP=${cap} 로는 어떤 창에서도 rate 가 정수가 되지 않는다. ` +
+    `1/3 · 1/9 · 1/27 처럼 분수로 준다.`,
+  );
+}
+
+export const RATE_WINDOW_SEC = IS_LOCAL ? windowFor(LOCAL_CAP) : 3;
+export const RATE_WINDOW = `${RATE_WINDOW_SEC}s`;
+
+/** 로컬이면 배율을 상한으로 깎는다. 0(Cool-down)은 그대로 둔다. */
+export function capMultiplier(m) {
+  return IS_LOCAL ? Math.min(m, LOCAL_CAP) : m;
+}
+
+/**
+ * 회차 VU 프로파일을 고른다. 로컬이면 축소판으로 갈아끼운다.
+ *
+ * 회차 파일이 VUS.roundA 를 직접 참조하지 않고 이 함수를 거치게 해서,
+ * '로컬인데 AWS 값으로 돌았다' 가 구조적으로 불가능하게 만든다.
+ */
+export function vusFor(key) {
+  const localKey = { roundA: 'localA', roundBC: 'localBC' }[key];
+  return IS_LOCAL && localKey ? VUS[localKey] : VUS[key];
+}
+
+/**
+ * '무엇으로 돌았는지' 를 구조화해서 돌려준다.
+ *
+ * ⚠️ 이 값을 run.sh 가 다시 계산하게 두지 않는다. 기본값(LOCAL_CAP)은 여기에만
+ *    있고 bash 는 그 값을 모르기 때문에, 양쪽이 각자 적으면 manifest 에
+ *    'localCap: null' 같은 빈칸이나 서로 다른 숫자가 남는다. summary.js 가
+ *    이걸 파일로 떨구고 run.sh 는 그 파일을 그대로 옮겨 담기만 한다.
+ */
+export function loadModeInfo(key) {
+  if (!IS_LOCAL || !{ roundA: 1, roundBC: 1 }[key]) return { reduced: false };
+  const v = vusFor(key);
+  return {
+    reduced: true,
+    cap: LOCAL_CAP,
+    window: RATE_WINDOW,
+    approxRps: Math.round(PEAK_RPS * LOCAL_CAP),
+    vus: v,
+  };
+}
+
+/** 요약·로그에 한 줄로 남긴다. 없으면 나중에 정상 회차로 착각한다. */
+export function loadModeNote(key) {
+  const i = loadModeInfo(key);
+  if (!i.reduced) return null;
+  return `로컬 축소 — 배율 상한 ${i.cap.toFixed(3)} (약 ${i.approxRps} RPS) · ` +
+    `창 ${i.window} · VU ${i.vus.preAllocatedVUs}/${i.vus.maxVUs}`;
+}
 
 /**
  * 계정이 VU 상한을 감당하는지 확인한다. 회차 스크립트의 setup() 에서 부른다.

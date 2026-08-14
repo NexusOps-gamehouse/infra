@@ -14,12 +14,21 @@
 //    k6 를 직접 부를 때는 그 플래그를 같이 주지 않으면 p99 칸이 비어 보인다.
 // ===========================================================================
 
+import { loadModeNote, loadModeInfo } from './config.js';
+
 // run.sh 가 절대경로로 넘긴다. 직접 k6 를 부르면 CWD 기준 상대경로가 된다.
 const DIR = __ENV.RESULT_DIR || 'results/local';
 const TESTID = __ENV.TESTID || 'local';
 const ROUND = __ENV.ROUND || 'unknown';
 
 const BAR = '═'.repeat(72);
+
+// 회차 이름 → VU 프로파일 키. 축소가 적용되는 회차만 매핑한다.
+//
+// ⚠️ 예전에는 'round-a 면 roundA, 아니면 roundBC' 로 갈랐다. 그러면 스모크와
+//    회차 D 도 roundBC 로 취급돼, 축소되지도 않은 회차에 '로컬 축소' 경고가
+//    붙었다. 요약이 사실과 다르면 요약이 아니라 소음이다.
+const MODE_KEY = { 'round-a': 'roundA', 'round-b': 'roundBC', 'round-c': 'roundBC' }[ROUND] || null;
 
 // ---------------------------------------------------------------------------
 // 조회 도우미 — 지표가 없을 때 예외를 던지지 않는다.
@@ -126,6 +135,12 @@ function render(data) {
     );
   }
   L.push(` 소요 ${duration(data.state.testRunDurationMs)}`);
+
+  // 축소 모드로 돈 회차를 정상 회차로 착각하는 것을 막는다. 숫자만 보면
+  // 구분이 안 되고, 구분이 안 되면 언젠가 이 결과가 보고서로 샌다.
+  const mode = loadModeNote(MODE_KEY);
+  if (mode) L.push(` ⚠ ${mode} — 완주 검증용. 판정 근거가 아니다`);
+
   L.push(BAR);
 
   // --- 대상이 죽었나 ------------------------------------------------------
@@ -161,10 +176,16 @@ function render(data) {
       L.push(`   즉, 예정 구간의 앞 ${duration(first * 1000)} 까지만 유효한 측정이다.`);
     }
     L.push('');
-    L.push('   확인할 것: 컨테이너가 살아 있나 · OOM Killer 가 잡았나 · 재시작했나');
+    // ⚠️ 순서가 중요하다. 실측(2026-08-13 회차 A): 컨테이너가 cgroup OOM 으로
+    //    죽었는데 docker logs 에는 아무것도 안 남았고(Java OOM 이 아니라 커널
+    //    SIGKILL 이라 그렇다), mac 에서는 dmesg 도 못 쓴다.
+    //    확정시켜준 것은 inspect 의 OOMKilled 한 줄뿐이라 그것을 맨 위에 둔다.
+    L.push('   확인할 것: OOM 이 먼저다. 아래 순서대로 본다');
+    L.push("     docker inspect gamehouse-backend --format '{{.State.OOMKilled}} {{.State.ExitCode}} {{.RestartCount}}'");
+    L.push('       → true 137 이면 컨테이너 메모리 한도 초과다 (mem_limit vs 유휴 RSS 를 본다)');
     L.push('     docker ps -a | grep gamehouse-backend');
     L.push('     docker logs --tail 100 gamehouse-backend');
-    L.push('     dmesg | tail -50          # OOM Killer');
+    L.push('       → 커널이 죽인 경우 여기엔 아무것도 안 남는다. 로그가 조용한 것이 곧 단서다');
     L.push(BAR);
   }
 
@@ -175,7 +196,18 @@ function render(data) {
   L.push(' 투입');
   L.push(`   달성 RPS     ${padStart(num(value(data, 'http_reqs', 'rate'), 1), 10)}   http_reqs`);
   L.push(`   TPS          ${padStart(num(value(data, 'iterations', 'rate'), 1), 10)}   iterations (1 iter = 1 요청)`);
-  L.push(`   VU 최대      ${padStart(num(value(data, 'vus_max', 'max') ?? value(data, 'vus_max', 'value')), 10)}   150 근처면 사고시간 가정과 일관`);
+  // ⚠️ vus 와 vus_max 는 다른 것을 센다.
+  //      vus      매초 관측된 '활성' VU     ← 우리가 보려는 값(결과)
+  //      vus_max  사전할당 상한             ← 투입한 설정값. 회차 내내 상수다
+  //    vus_max 를 찍으면 회차 A 는 늘 400, B·C 는 늘 800 이 나와서
+  //    "150 근처인가" 라는 판정 자체가 성립하지 않는다.
+  const vusObserved = value(data, 'vus', 'max');
+  const vusAlloc = value(data, 'vus_max', 'max') ?? value(data, 'vus_max', 'value');
+  L.push(
+    `   VU 관측 최대 ${padStart(num(vusObserved), 10)}   150 근처면 사고시간 가정과 일관` +
+    (vusObserved === 0 ? ' (0 = 회차가 짧아 표본 없음)' : ''),
+  );
+  L.push(`   VU 할당      ${padStart(num(vusAlloc), 10)}   preAllocated/max. 관측값이 여기 닿으면 러너가 상한이다`);
 
   const dropped = value(data, 'dropped_iterations', 'count') ?? 0;
   L.push(
@@ -268,8 +300,14 @@ function mb(bytes) {
 
 export function handleSummary(data) {
   const text = render(data);
+  const mode = loadModeInfo(MODE_KEY);
 
-  return {
+  const files = {
+    // 축소 모드로 돌았다면 '무엇으로 돌았는지' 를 기계가 읽을 형태로 남긴다.
+    // run.sh 가 이 파일을 manifest.json 에 그대로 옮겨 담는다 — bash 가 기본값을
+    // 다시 계산하지 않게 하려는 것이다(config.js 의 loadModeInfo 주석 참조).
+    ...(mode.reduced ? { [`${DIR}/load-mode.json`]: JSON.stringify(mode, null, 2) } : {}),
+
     stdout: `\n${text}\n`,
 
     // 사람이 읽을 것. 회차 직후 그대로 공유해도 되게 만든다.
@@ -279,4 +317,6 @@ export function handleSummary(data) {
     // 지금 알 수 없으므로 골라 담지 않는다. 수십 KB 밖에 안 된다.
     [`${DIR}/summary.json`]: JSON.stringify(data, null, 2),
   };
+
+  return files;
 }

@@ -9,7 +9,7 @@
 // 회차 후 45 RPS 로 낮춰 2분 내 복구되는지 별도로 본다.
 // ===========================================================================
 
-import { MULTIPLIER, VUS, SYSTEM_TAGS, assertAccountsCoverVUs } from '../lib/config.js';
+import { MULTIPLIER, vusFor, SYSTEM_TAGS, assertAccountsCoverVUs } from '../lib/config.js';
 import { assertSeed } from '../lib/data.js';
 import { rampingScenarios, stepStages } from '../options/scenarios.js';
 import { stressThresholds } from '../options/thresholds.js';
@@ -50,7 +50,7 @@ export const options = {
       { duration: '10s', multiplier: MULTIPLIER.OFF_PEAK },
       { duration: '2m', multiplier: MULTIPLIER.OFF_PEAK },
     ],
-    vus: VUS.roundBC,
+    vus: vusFor('roundBC'),   // 로컬이면 축소판(VUS.localBC)
   }),
   thresholds: stressThresholds(),
 };

@@ -10,7 +10,9 @@
 //    않는다. 둘 다 붙이면 라벨이 이중화된다.
 // ===========================================================================
 
-import { SCENARIO, ENDPOINT, arrivalRate, MULTIPLIER } from '../lib/config.js';
+import {
+  SCENARIO, ENDPOINT, arrivalRate, MULTIPLIER, capMultiplier, RATE_WINDOW,
+} from '../lib/config.js';
 
 const KEYS = Object.values(SCENARIO);
 
@@ -46,13 +48,15 @@ export function rampingScenarios({ stages, startMultiplier, vus, only }) {
   for (const key of keys) {
     out[key] = {
       executor: 'ramping-arrival-rate',
-      // 배율이 전부 n/3 이라 timeUnit 을 3s 로 두면 모든 조합이 정수로 떨어진다.
-      // k6 의 rate 는 정수만 받는다.
-      timeUnit: '3s',
-      startRate: arrivalRate(key, startMultiplier).rate,
+      // 창 길이는 config.js 가 정한다(운영 3s / 로컬 9s). 여기에 다시 적으면
+      // arrivalRate() 가 계산한 rate 와 창이 어긋나 도착률이 통째로 틀어진다.
+      timeUnit: RATE_WINDOW,
+      // capMultiplier: 로컬이면 배율을 상한으로 깎는다(config.js 의 LOCAL_CAP).
+      // 여기 한 곳에서만 깎아야 8개 시나리오의 비중이 그대로 유지된다.
+      startRate: arrivalRate(key, capMultiplier(startMultiplier)).rate,
       stages: stages.map((s) => ({
         duration: s.duration,
-        target: arrivalRate(key, s.multiplier).rate,
+        target: arrivalRate(key, capMultiplier(s.multiplier)).rate,
       })),
       preAllocatedVUs: splitVUs(key, vus.preAllocatedVUs),
       maxVUs: splitVUs(key, vus.maxVUs),
