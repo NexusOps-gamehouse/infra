@@ -12,7 +12,7 @@
 #   · uri 라벨   — /api/posts/{id} 로 묶이지 않으면 게시글 수만큼 시계열이
 #                  생겨 actuator 응답 자체가 커진다
 #
-# 회차 전에 한 번만 돌리면 된다. 결과는 README 에 적어 둔다.
+# 회차 전에 한 번만 돌리면 된다.
 #
 # 대상은 앱 포트(8080)가 아니라 management 포트다. application.yml 에서
 # management.server.port=8081 로 분리해 두었다.
