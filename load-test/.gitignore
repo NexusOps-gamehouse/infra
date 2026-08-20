@@ -1,0 +1,8 @@
+# 계약 ① 산출물 — generate.sh 가 만든다. 평문 비밀번호와 JWT 가 들어있다.
+seed/data/
+
+# 회차 결과.
+# 디렉터리 자체는 남긴다 — clone 직후 없으면
+# k6 run --summary-export=results/... 가 "No such file or directory" 로 죽는다.
+results/*
+!results/.gitkeep

@@ -1,0 +1,107 @@
+# ===========================================================================
+# 관측 스택 — 로컬 override
+#
+# docker-compose.observability.yml 은 EC2 기준으로 쓰여 있다. exporter 가
+# ${DB_HOST}(공용 dev RDS)를 보게 되어 있어서, 그대로 로컬에서 띄우면
+# 화면에는 RDS 의 상태가 그려진다. 로컬에서 k6 를 돌려도 그 부하는
+# 로컬 postgres 에 쌓이므로 그래프에는 아무것도 나타나지 않는다.
+#
+# 이 파일은 그 한 가지만 바로잡는다. 공용 파일은 건드리지 않으므로
+# 실수로 커밋해도 EC2 배포가 깨지지 않는다.
+#
+# ⚠️ 반드시 -p gamehouse 로 프로젝트를 고정해서 띄운다.
+#    docker-compose.yml 은 name: gamehouse, 관측 파일은 name: gamehouse-observe
+#    라서, -p 없이 -f 로 합치면 뒤 파일의 이름이 이겨 스택 전체가
+#    'gamehouse-observe' 라는 새 프로젝트로 복제된다. 컨테이너가 두 벌
+#    뜨고 포트가 충돌한다. 자세한 실행법은 이 파일 맨 아래 주석에 있다.
+# ===========================================================================
+
+services:
+
+  prometheus:
+    # k6 지표를 받기 위한 수신 엔드포인트(/api/v1/write)를 연다.
+    #
+    # Prometheus 는 긁어오는(scrape) 방식인데, k6 는 회차가 도는 동안에만
+    # 존재하는 프로세스라 긁으러 갈 대상이 없다. 그래서 k6 쪽이 밀어넣는다
+    # (remote write). 기본값으로는 그 문이 닫혀 있어서 보내도 받지 않는다.
+    #
+    # 공용 파일이 아니라 여기 두는 이유는 보안이 아니라 '운영 Prometheus 와
+    # TSDB 를 나눠 쓰지 않기' 다. 운영 Prometheus 는 대상 EC2 에 함께 얹혀
+    # 있고, deploy.sh 가 배포하는 compose 는 docker-compose.yml 과
+    # docker-compose.observability.yml 둘뿐이다(scripts/deploy.sh:15-16).
+    # 공용 파일에 넣으면 그대로 운영에 올라가고, k6 데이터가 운영 지표와
+    # 같은 retention 2GB 를 나눠 쓴다 — 카디널리티가 튀면 운영 지표가 먼저
+    # 밀려난다.
+    #
+    # AWS 회차에서 이 플래그를 아예 안 쓰는 것은 아니다. 관측 방식은 아직
+    # 미정이고(task/k6/docs/aws.md 2절), 유력한 안은 '러너 EC2 에 부하 테스트
+    # 전용 Prometheus' 다 — 거기엔 붙는다. 운영 것이 아니기 때문이다.
+    #
+    # 그 선택의 근거가 로컬에서 나온다. 회차 1회 후 prometheus_tsdb_head_series
+    # 증가폭을 재서 고르기로 되어 있어서, 여기를 안 켜면 그 숫자가 안 나온다.
+    #
+    # ⚠️ command 는 리스트라 오버라이드에서 병합이 아니라 '교체' 된다.
+    #    한 줄만 적으면 --config.file 까지 사라져서 Prometheus 가 기본 설정으로
+    #    뜬다(수집 대상 0개). 공용 파일의 네 줄을 그대로 다시 적어야 한다.
+    #    docker-compose.observability.yml 쪽을 고치면 여기도 같이 고칠 것.
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=2GB
+      - --enable-feature=expand-external-labels
+      - --web.enable-remote-write-receiver
+
+  postgres-exporter:
+    environment:
+      # 로컬 postgres 컨테이너를 본다. docker-compose.local.yml 이 backend 에
+      # 넘기는 것과 같은 LOCAL_DB_* 를 그대로 쓴다 — 앱이 쓰는 DB 와 exporter 가
+      # 보는 DB 가 갈리면 관측이 아니라 오해가 된다.
+      #
+      # sslmode=disable 이 핵심이다. 공용 파일은 require 인데, RDS 가 SSL 을
+      # 강제하기 때문이다. 반면 postgres:16 공식 이미지는 SSL 이 꺼진 채로
+      # 뜨므로 require 를 그대로 두면 접속 자체가 실패하고 pg_up 0 만 남는다.
+      DATA_SOURCE_URI: "${LOCAL_DB_HOST}:${LOCAL_DB_PORT}/${LOCAL_DB_NAME}?sslmode=disable"
+
+      # 로컬에는 exporter 전용 계정을 만들지 않는다. 공용 파일이 읽기 전용
+      # 계정을 쓰는 이유는 운영 DB 의 테이블 데이터를 exporter 가 못 보게
+      # 하려는 것인데, 로컬 DB 는 어차피 시딩된 더미다. 계정을 하나 더 만들면
+      # generate.sh 가 DB 를 비울 때마다 다시 만들어야 한다.
+      DATA_SOURCE_USER: ${LOCAL_DB_USERNAME}
+      DATA_SOURCE_PASS: ${LOCAL_DB_PASSWORD}
+
+    # 공용 파일에서는 observe-net 하나뿐이다. RDS 가 도커 밖이라 호스트를
+    # 거쳐 나가면 되기 때문이다. 그런데 로컬 postgres 는 backend-net 안에
+    # 있으므로(docker-compose.local.yml) 여기 합류하지 않으면 호스트명
+    # 'postgres' 가 풀리지 않는다.
+    #
+    # ⚠️ 두 개를 다 적는다. 서비스 단위 networks 가 병합인지 교체인지에
+    #    기대지 않기 위해서다. observe-net 이 빠지면 Prometheus 가 exporter 를
+    #    긁지 못한다.
+    networks:
+      - observe-net
+      - gamehouse_backend-net
+
+# ---------------------------------------------------------------------------
+# 실행법 — 백엔드 + 관측 스택을 한 번에
+#
+#   cd infra
+#   docker compose -p gamehouse --env-file .env.local \
+#     -f docker-compose.yml \
+#     -f docker-compose.local.yml \
+#     -f docker-compose.observability.yml \
+#     -f docker-compose.observability.local.yml \
+#     up -d
+#
+# 내리기 (-p 와 -f 목록을 그대로 반복한다. 빠뜨리면 일부만 내려간다)
+#   위 명령의 up -d 를 down 으로 바꾼다
+#
+# 보는 곳
+#   Grafana      http://localhost:13000   (.env.local 의 GF_ADMIN_*)
+#   Prometheus   http://localhost:19090
+#   exporter     http://localhost:19187/metrics
+#
+# 확인 — exporter 가 '로컬' DB 를 보고 있는지
+#   curl -s localhost:19187/metrics | grep 'pg_stat_user_tables_idx_scan.*posts'
+#   회차를 돌리고 다시 재면 이 값이 올라가야 한다. 안 올라가면 RDS 를
+#   보고 있는 것이다.
+# ---------------------------------------------------------------------------

@@ -1,0 +1,8 @@
+{
+  "generatedAt": "2026-08-12T00:00:00Z",
+  "baseUrl": "http://localhost:8080",
+  "profile": "smoke",
+  "accounts": 5,
+  "posts": 10,
+  "applications": 30
+}
