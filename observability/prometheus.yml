@@ -95,7 +95,21 @@ scrape_configs:
     # postgres_exporter 는 테이블·인덱스 단위로도 지표를 쏟아낸다.
     # retention 이 2GB 뿐이므로 cAdvisor 와 같은 이유로 실제 쓰는 것만 남긴다.
     # 새 패널을 만들면서 "메트릭이 없다"면 이 목록에 빠져 있는지 먼저 확인할 것.
+    #
+    # pg_stat_user_tables_(seq_scan|idx_scan) — "그 테이블을 훑은 횟수" 다.
+    #   load-test/query-count.sh 가 psql 로 직접 읽는 값과 같은 것이고,
+    #   이 두 줄이 그것을 시계열로 남긴다. exporter 는 이 계열로 90개를
+    #   뱉지만(테이블 9 × 지표 10) 두 개만 남기므로 실제 증가분은 18 개다.
+    #
+    #   ⚠️ 이 값으로 N+1 을 '판정' 하지 않는다. 두 가지가 막는다.
+    #      · DB 전역이라 어느 엔드포인트가 훑었는지 구분되지 않는다.
+    #        '요청당' 으로 읽으려면 그 시간대 트래픽이 한 종류여야 한다(회차 D).
+    #      · PG 15+ 는 백엔드가 통계를 모아 뒀다가 최대 10초 뒤에 공유 메모리로
+    #        넘긴다. 30초 간격 수집이라 수 분짜리 구간에서는 묻히지만,
+    #        짧은 스파이크는 실제보다 뒤로 밀려 보인다.
+    #      판정은 query-count.sh 의 '건당' 열이 한다. 여기 있는 것은 개선 전후로
+    #      그 값이 실제로 떨어졌는지를 이어서 보기 위한 것이다.
     metric_relabel_configs:
       - source_labels: [__name__]
-        regex: 'pg_up|pg_settings_max_connections|pg_stat_database_(numbackends|blks_hit|blks_read|xact_commit|xact_rollback|deadlocks)|pg_stat_activity_max_tx_duration|pg_database_size_bytes'
+        regex: 'pg_up|pg_settings_max_connections|pg_stat_database_(numbackends|blks_hit|blks_read|xact_commit|xact_rollback|deadlocks)|pg_stat_activity_max_tx_duration|pg_database_size_bytes|pg_stat_user_tables_(seq_scan|idx_scan)'
         action: keep
