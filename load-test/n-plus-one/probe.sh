@@ -84,8 +84,14 @@ command -v curl >/dev/null 2>&1 || { echo "curl 이 없다." >&2; exit 1; }
 #    IFS='@@' 는 IFS='@' 과 같고, 그러면 '@@' 사이의 빈 칸이 필드로 잡혀
 #    열이 통째로 밀린다. jq 식에 '|' 가 들어가므로 ';' 를 쓴다.
 # ---------------------------------------------------------------------------
+#
+# ⚠️ 항목수 jq 는 '응답이 배열인가 객체인가' 에 딸려 있다. 페이징이 들어가면서
+#    /api/posts 가 배열에서 { items, page, size, totalElements, hasNext } 로
+#    바뀌었는데, jq 의 length 는 객체에 쓰면 '키 개수' 를 돌려준다. 고치지 않으면
+#    분모가 20 이 아니라 5 가 되어 건당이 4배로 뻥튀기된다 — 그런데 에러는 안 나고
+#    표는 멀쩡히 그려진다. 응답 모양을 바꾼 API 는 여기도 같이 봐야 한다.
 read -r -d '' TARGETS <<'EOF' || true
-posts;/api/posts;length;게시글;list
+posts;/api/posts;.items|length;게시글;list
 my-apps;/api/my/applications;length;신청;list
 chat-rooms;/api/chat/rooms;length;채팅방;list
 friends;/api/friends;length;친구;list
