@@ -31,7 +31,7 @@ RESULTS_ROOT="${SCRIPT_DIR}/results"
 # ---------------------------------------------------------------------------
 usage() {
   cat >&2 <<'EOF'
-사용법: ./run.sh <회차> [--raw] [--full] [--queries] [-- k6 에 그대로 넘길 인자...]
+사용법: ./run.sh <회차> [--raw] [--full] [--queries] [--prom] [-- k6 에 그대로 넘길 인자...]
 
   smoke      경로 검증. 성능 측정 아님
   round-a    Load    — 유일한 판정 근거
@@ -45,6 +45,11 @@ usage() {
              회차 A·B·C 에만 의미가 있다. 실측상 완주하지 못한다 — 한계 확인용.
   --queries  회차 동안 DB 가 받은 쿼리 수를 센다 (queries.txt · queries.json).
              N+1 판별용. 재는 동안 다른 트래픽이 없어야 한다.
+  --prom     k6 지표를 Prometheus 로 밀어넣는다 (remote write).
+             대시보드 '10 load test' 의 k6 패널이 이걸 켜야 채워진다.
+             관측 스택이 떠 있어야 하고, 수신 플래그가 필요하다
+             (docker-compose.observability.local.yml 의 prometheus command).
+             주소는 K6_PROMETHEUS_RW_SERVER_URL 로 바꾼다.
 
 예)
   ./run.sh smoke
@@ -53,6 +58,7 @@ usage() {
   ./run.sh round-d --raw
   ./run.sh round-d --queries          # N+1 판별
   ./run.sh round-a --full             # 로컬에서 AWS 규모로 (죽는 지점을 본다)
+  ./run.sh round-d --prom             # 대시보드에 k6 지표까지 그린다
   ./run.sh round-a -- --http-debug=full
 EOF
   exit 1
@@ -74,12 +80,14 @@ esac
 RAW=0
 FULL=0
 QUERIES=0
+PROM=0
 K6_EXTRA=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --raw) RAW=1; shift ;;
     --full) FULL=1; shift ;;
     --queries) QUERIES=1; shift ;;
+    --prom) PROM=1; shift ;;
     --) shift; K6_EXTRA=("$@"); break ;;
     *) echo "모르는 인자: $1" >&2; usage ;;
   esac
@@ -224,6 +232,70 @@ if [[ "${LOCAL}" -eq 0 && "${FULL}" -eq 1 ]]; then
   echo "⚠ --full 은 로컬 전용이다. 대상이 원격이라 이미 전체 규모다 — 무시한다"
   FULL=0
 fi
+
+# ---------------------------------------------------------------------------
+# --prom — k6 지표를 Prometheus 로 밀어넣는다 (remote write)
+#
+# Prometheus 는 긁어오는(scrape) 방식인데 k6 는 회차가 도는 동안에만 존재하는
+# 프로세스라 긁으러 갈 대상이 없다. 그래서 k6 쪽이 밀어넣는다. 받는 쪽에
+# --web.enable-remote-write-receiver 가 켜져 있어야 하고, 그 플래그는
+# docker-compose.observability.local.yml 이 로컬에만 얹는다.
+#
+# 기본으로 켜지 않는 이유는 README 2절이다 — 로컬 회차는 관측 스택을 안 띄운다.
+# 받는 곳이 없는데 켜면 k6 가 회차 내내 전송 실패를 뱉는다.
+# ---------------------------------------------------------------------------
+PROM_URL=""
+if [[ "${PROM}" -eq 1 ]]; then
+  PROM_URL="${K6_PROMETHEUS_RW_SERVER_URL:-http://localhost:19090/api/v1/write}"
+
+  # ⚠️ 통계를 제한한다. prometheus.yml 의 metric_relabel_configs keep 규칙은
+  #    scrape_configs 안에 있어서 remote write 로 들어오는 시계열에는 적용되지
+  #    않는다. 제한하지 않으면 Trend 지표마다 계열이 여러 개씩 붙어 카디널리티가
+  #    튄다 — 대시보드의 'Prometheus 시계열 수' 패널이 그것을 감시한다.
+  PROM_TREND_STATS="${K6_PROMETHEUS_RW_TREND_STATS:-p(95),p(99),count}"
+
+  # 회차 '전에' 막는다. 18분을 다 돌고 나서 한 건도 안 들어갔다는 것을 아는 것이
+  # 가장 나쁘다. 빈 본문을 POST 해서 응답 코드로 셋을 구분한다.
+  #
+  # 실측(2026-08-20, prom/prometheus:v2.55.1):
+  #   400  수신 켜짐. 경로가 열려 있고 본문(snappy)만 못 읽은 것이다  ← 정상
+  #   415  수신 켜짐. Content-Type 을 빼고 보내면 이쪽이 나온다
+  #   404  수신 꺼짐. --web.enable-remote-write-receiver 가 없어 경로가 없다
+  #   000  붙지 못함. 관측 스택이 안 떠 있다
+  #
+  # ⚠️ Content-Type 을 붙여야 400 과 404 가 갈린다. 안 붙이면 경로가 있든 없든
+  #    415/404 로 나와 '수신이 켜졌는가' 를 판정할 수 없다.
+  PROM_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 \
+                -X POST "${PROM_URL}" \
+                -H 'Content-Type: application/x-protobuf' \
+                --data-binary '' 2>/dev/null || echo 000)
+  case "${PROM_CODE}" in
+    400|415|200|204)
+      echo "k6 지표를 Prometheus 로 보낸다 → ${PROM_URL}"
+      echo "  통계 ${PROM_TREND_STATS} (카디널리티 제한)"
+      ;;
+    404)
+      {
+        echo "Prometheus 가 remote write 를 받지 않는다 (404): ${PROM_URL}"
+        echo ""
+        echo "  수신 플래그를 켠 뒤 다시 띄운다:"
+        echo "      docker-compose.observability.local.yml 의 prometheus command 에"
+        echo "      --web.enable-remote-write-receiver 가 들어 있는지 확인한다."
+        echo ""
+        echo "  --prom 없이 돌리면 회차 자체는 정상이다 (k6 패널만 빈다)."
+      } >&2
+      exit 1
+      ;;
+    *)
+      {
+        echo "Prometheus 에 붙지 못했다 (${PROM_CODE}): ${PROM_URL}"
+        echo "  관측 스택이 떠 있는지 본다 — docker ps | grep gamehouse-prometheus"
+        echo "  주소가 다르면 K6_PROMETHEUS_RW_SERVER_URL 로 준다."
+      } >&2
+      exit 1
+      ;;
+  esac
+fi
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -247,6 +319,9 @@ K6_ARGS=(
   --env "LOCAL_FULL=${FULL}"
 )
 [[ -n "${LOCAL_CAP:-}" ]] && K6_ARGS+=(--env "LOCAL_CAP=${LOCAL_CAP}")
+
+# 위 --tag 두 개가 여기로 나간다. 대시보드의 $testid 변수가 그 값을 고른다.
+[[ "${PROM}" -eq 1 ]] && K6_ARGS+=(--out experimental-prometheus-rw)
 
 if [[ "${RAW}" -eq 1 ]]; then
   # .gz 로 끝나면 k6 가 압축해서 쓴다. 회차 A 는 압축 전 400MB 대라
@@ -287,6 +362,8 @@ set +e
 RESULT_DIR="${RESULT_DIR}" TESTID="${TESTID}" ROUND="${ROUND}" \
 BASE_URL="${BASE_URL}" LOCAL="${LOCAL}" SEED_DATA_DIR="${SEED_DIR}" \
 LOCAL_CAP="${LOCAL_CAP:-}" \
+K6_PROMETHEUS_RW_SERVER_URL="${PROM_URL}" \
+K6_PROMETHEUS_RW_TREND_STATS="${PROM_TREND_STATS:-}" \
   k6 "${K6_ARGS[@]}" "${K6_DIR}/${SCRIPT}"
 EXIT_CODE=$?
 set -e
@@ -382,6 +459,7 @@ jq -n \
   --argjson load "${LOAD_JSON}" \
   --argjson queries "${QUERIES_JSON}" \
   --argjson raw "${RAW}" \
+  --arg promRw "${PROM_URL}" \
   --arg scaleFile "$(basename "${SCALE_FILE}")" \
   --arg gitCommit "${GIT_COMMIT}" \
   --arg k6Version "$(k6 version 2>/dev/null | head -1)" \
@@ -396,6 +474,7 @@ jq -n \
      queries: $queries,
      seed: $seed[0], scaleFile: $scaleFile,
      raw: ($raw == 1),
+     promRw: (if $promRw == "" then null else $promRw end),
      runner: { k6: $k6Version, host: $host, gitCommit: $gitCommit }
    }' > "${RESULT_DIR}/manifest.json"
 
