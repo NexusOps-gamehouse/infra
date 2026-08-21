@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis
+  namespace: gamehouse
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: match
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: crew
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: riot
+      ports:
+        - protocol: TCP
+          port: 6379

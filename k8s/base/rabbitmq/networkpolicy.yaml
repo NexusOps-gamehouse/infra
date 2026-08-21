@@ -1,0 +1,45 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rabbitmq
+  namespace: gamehouse
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  policyTypes:
+    - Ingress
+  ingress:
+    # 이벤트를 발행/구독하는 서비스 + STOMP 를 쓰는 chat + 메트릭 스크레이프.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: user
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: post
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: chat
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: match
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: crew
+      ports:
+        - protocol: TCP
+          port: 5672
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: chat
+      ports:
+        - protocol: TCP
+          port: 61613
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 15692
+  # egress 는 baseline(default-deny)에 DNS 만 허용하면 충분 — rabbitmq 는 나가는 호출이 없다.
