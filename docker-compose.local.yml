@@ -15,6 +15,27 @@ services:
         condition: service_healthy
 
 
+  # 로컬 개발용 포트 공개.
+  #
+  # 기본 compose(docker-compose.yml)에는 rabbitmq 에 ports 가 없다.
+  # backend 컨테이너가 같은 backend-net 안에 있어서 rabbitmq:61613 으로
+  # 바로 닿았기 때문이다. 외부에 열 이유가 없었다.
+  #
+  # 그런데 백엔드를 MSA 로 나눈 뒤로는 개발 중에 user/post/chat/riot 을
+  # IDE 에서 직접 띄운다. 그 프로세스들은 도커 네트워크 밖(호스트)에 있어서
+  # 61613 이 호스트에 열려 있지 않으면 chat 의 STOMP 릴레이가 붙지 못한다.
+  #   TCP connection failure in session _system_: Connection refused ...:61613
+  # 앱은 뜨지만 5초마다 재접속을 시도하고, WebSocket 채팅만 동작하지 않는다.
+  #
+  # 이 파일은 로컬 전용 오버레이라 운영 배포에는 영향이 없다.
+  # STOMP 플러그인은 infra/rabbitmq/Dockerfile 에서 이미 켜 두었다.
+  rabbitmq:
+    ports:
+      - "5672:5672"     # AMQP  — 서비스 간 이벤트 (post ↔ chat ↔ user)
+      - "61613:61613"   # STOMP — 채팅 메시지 릴레이 (브라우저 ↔ chat)
+      - "15672:15672"   # 관리 UI (http://localhost:15672)
+
+
   frontend:
     pull_policy: never
 

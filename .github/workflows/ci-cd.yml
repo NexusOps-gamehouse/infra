@@ -189,14 +189,37 @@ jobs:
   # deploy.sh 자체가 docker-compose.yml만 명시적으로 사용한다.
   # ===============================================================
 
+  # ---------------------------------------------------------------
+  # ⛔ 현재 비활성 — if: false
+  #
+  # [왜 껐나]
+  # 백엔드가 MSA 로 나뉘어 서비스 4개(user/post/chat/riot)가 됐다.
+  # 그런데 docker-compose.yml 은 아직 backend 컨테이너 1개 전제이고,
+  # RDS 에도 서비스별 스키마·계정이 없다. 이 상태로 deploy.sh 가 돌면
+  #   - 옛 backend 이미지 하나만 뜨거나
+  #   - 새 이미지가 떠도 default_schema(post_svc 등)를 찾지 못한다
+  #
+  # [되살리는 조건] — 4단계 배포 준비
+  #   1. docker-compose.yml 을 서비스 4개로 확장 (user/post/chat/riot)
+  #   2. nginx 또는 Ingress 경로 라우팅
+  #        /api/auth · /api/users · /api/friends · /api/notifications · /uploads → user
+  #        /api/posts · /api/applications · /api/my                             → post
+  #        /api/chat · /ws                                                      → chat
+  #        riot 은 내부 전용 — 외부 노출 없음
+  #   3. RDS 에 backend/db/migration/V1·V2 적용
+  #   4. 배포 환경변수 추가 — USER/POST/CHAT_DB_USERNAME·PASSWORD
+  #   위 넷이 끝나면 아래 if 를 원래대로 되돌린다.
+  #     if: github.event_name == 'push'
+  # ---------------------------------------------------------------
+
   deploy:
 
-    name: deploy
+    name: deploy (비활성 — 4단계 준비 후 활성화)
 
     needs:
       - verify
 
-    if: github.event_name == 'push'
+    if: false
 
     runs-on: ubuntu-latest
 
