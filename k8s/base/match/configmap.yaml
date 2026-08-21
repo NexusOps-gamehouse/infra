@@ -9,7 +9,6 @@ data:
   SPRING_PROFILES_ACTIVE: "k8s"
   ENV_NAME: "local"
   CORS_ALLOWED_ORIGINS: "https://gamehouse.example.com"
-  DB_HOST: "CHANGE_ME-in-overlay"
   DB_PORT: "5432"
   DB_NAME: "duo"
   REDIS_HOST: "redis.gamehouse.svc.cluster.local"

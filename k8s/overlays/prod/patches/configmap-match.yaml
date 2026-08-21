@@ -1,9 +1,9 @@
-# ⚠️ CHANGE_ME: 실제 RDS 엔드포인트로 교체.
+# DB_HOST 는 여기 없다 — ExternalSecret 이 AWS Secrets Manager 에서 받아온다.
+# (external-secrets/external-secret-db-match.yaml)
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: match-config
   namespace: gamehouse
 data:
-  DB_HOST: "CHANGE_ME.xxxxxxxxxxxx.ap-northeast-2.rds.amazonaws.com"
   ENV_NAME: "prod"
