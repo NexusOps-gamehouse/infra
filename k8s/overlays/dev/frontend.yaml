@@ -20,7 +20,7 @@ spec:
       serviceAccountName: frontend
       containers:
         - name: frontend
-          image: nexusops0713/gamehouse-frontend:develop
+          image: gamehouse-frontend:OVERLAY_MUST_SET
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

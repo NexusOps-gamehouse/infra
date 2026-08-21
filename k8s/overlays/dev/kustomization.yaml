@@ -39,6 +39,32 @@ patches:
 # `kustomize edit set image nexusops0713/gamehouse-user=nexusops0713/gamehouse-user:<tag>` 처럼
 # 서비스별로 개별 지정한다 — 레포가 서비스마다 분리돼 있어 안전하다.
 
+images:
+  # dev 는 로컬에서 빌드해 kind 노드에 직접 적재한 이미지를 쓴다. 레지스트리를 안 탄다.
+  #
+  #   cd backend
+  #   docker build -t gamehouse-user:develop -f user/Dockerfile .   # 컨텍스트는 backend/ 루트
+  #   kind load docker-image gamehouse-user:develop --name gamehouse-dev
+  #
+  # CI 이미지(nexusops0713/gamehouse:<svc>-develop)를 쓰지 않는 이유가 둘 있다.
+  #   1. 비공개 레포라 imagePullSecrets 가 필요하다 — 아직 없다.
+  #   2. CI 가 platforms: linux/amd64 단일 빌드라 arm64 kind 노드에서는
+  #      no matching manifest for linux/arm64 로 실패한다.
+  # 둘 다 풀리면 각 항목에 newName: nexusops0713/gamehouse 를 추가하고
+  # newTag 를 <svc>-develop 으로 바꾸면 레지스트리 경로로 전환된다.
+  - name: gamehouse-user
+    newTag: develop
+  - name: gamehouse-post
+    newTag: develop
+  - name: gamehouse-chat
+    newTag: develop
+  - name: gamehouse-riot
+    newTag: develop
+  - name: gamehouse-frontend
+    newTag: develop
+  - name: gamehouse-rabbitmq
+    newTag: develop
+
 labels:
   - pairs:
       app.kubernetes.io/environment: dev

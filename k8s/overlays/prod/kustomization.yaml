@@ -59,20 +59,40 @@ patches:
   # - path: patches/delete-secret-crew-db.yaml
 
 images:
-  - name: nexusops0713/gamehouse-user
-    newTag: REPLACE_AT_DEPLOY
-  - name: nexusops0713/gamehouse-post
-    newTag: REPLACE_AT_DEPLOY
-  - name: nexusops0713/gamehouse-chat
-    newTag: REPLACE_AT_DEPLOY
-  # - name: nexusops0713/gamehouse-match
-  #   newTag: REPLACE_AT_DEPLOY
-  # - name: nexusops0713/gamehouse-crew
-  #   newTag: REPLACE_AT_DEPLOY
-  - name: nexusops0713/gamehouse-riot
-    newTag: REPLACE_AT_DEPLOY
-  - name: nexusops0713/gamehouse-rabbitmq
-    newTag: REPLACE_AT_DEPLOY
+  # CI(backend·frontend 의 ci-cd.yml)는 레포 하나에 서비스를 태그 접두사로 구분해
+  # 푸시한다 — nexusops0713/gamehouse:<service>-<sha>
+  #
+  # base 가 실제 레포 대신 서비스별 논리 이름(gamehouse-user 등)을 쓰는 이유가
+  # 이것이다. images: 트랜스포머는 레포 이름으로만 매칭하므로, base 가
+  # nexusops0713/gamehouse 를 직접 쓰면 4개 서비스가 전부 같은 이름이 되어
+  # 서비스 하나만 골라 태그를 바꿀 수 없다.
+  #
+  # CI 는 서비스별로 이렇게 지정한다:
+  #   kustomize edit set image gamehouse-user=nexusops0713/gamehouse:user-$GIT_SHA
+  - name: gamehouse-user
+    newName: nexusops0713/gamehouse
+    newTag: user-REPLACE_AT_DEPLOY
+  - name: gamehouse-post
+    newName: nexusops0713/gamehouse
+    newTag: post-REPLACE_AT_DEPLOY
+  - name: gamehouse-chat
+    newName: nexusops0713/gamehouse
+    newTag: chat-REPLACE_AT_DEPLOY
+  # - name: gamehouse-match
+  #   newName: nexusops0713/gamehouse
+  #   newTag: match-REPLACE_AT_DEPLOY
+  # - name: gamehouse-crew
+  #   newName: nexusops0713/gamehouse
+  #   newTag: crew-REPLACE_AT_DEPLOY
+  - name: gamehouse-riot
+    newName: nexusops0713/gamehouse
+    newTag: riot-REPLACE_AT_DEPLOY
+  # ⚠️ rabbitmq 는 이미지를 푸시하는 CI 가 아직 없다. infra 의 ci-cd.yml 은
+  #    docker-compose 검증만 하고, compose 는 rabbitmq 를 build: 로 로컬 빌드한다.
+  #    EKS 에 올리려면 infra CI 에 build-push 잡을 추가해야 한다.
+  - name: gamehouse-rabbitmq
+    newName: nexusops0713/gamehouse
+    newTag: rabbitmq-REPLACE_AT_DEPLOY
 
 labels:
   - pairs:
