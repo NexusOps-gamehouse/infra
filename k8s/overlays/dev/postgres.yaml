@@ -1,0 +1,159 @@
+# dev 전용 — kind 클러스터 안에서 도는 단일 PostgreSQL.
+# prod 는 RDS 를 쓰므로 이 파일은 overlays/dev 에만 존재한다(overlays/prod 에는 없음).
+#
+# docker-compose.local.yml 의 postgres 서비스(postgres:16, DB duo)를 그대로 옮긴 것.
+# 다만 섹션11 설계대로 "한 DB, 서비스별 스키마" 구조에 맞춰 initdb 스크립트가
+# user_/post_/chat_/match_/crew_ 스키마를 미리 만들어 둔다 — 안 그러면 각 서비스가
+# 뜨자마자 ddl-auto: update 가 스키마 없음으로 실패한다.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-initdb
+  namespace: gamehouse
+data:
+  01-schemas.sql: |
+    CREATE SCHEMA IF NOT EXISTS user_;
+    CREATE SCHEMA IF NOT EXISTS post_;
+    CREATE SCHEMA IF NOT EXISTS chat_;
+    CREATE SCHEMA IF NOT EXISTS match_;
+    CREATE SCHEMA IF NOT EXISTS crew_;
+    -- riot 은 소유 테이블이 없다(섹션 11) — 스키마 생성 안 함.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-credentials
+  namespace: gamehouse
+type: Opaque
+# dev 전용 더미값 — kind 로컬 클러스터 밖으로 나가지 않으므로 커밋해도 안전하다.
+# prod 에서는 이 Secret 자체가 존재하지 않는다(RDS 는 overlays/prod/external-secrets.yaml 로 관리).
+stringData:
+  POSTGRES_DB: "duo"
+  POSTGRES_USER: "duo"
+  POSTGRES_PASSWORD: "dev-local-only-password"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: gamehouse
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 3Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # ReadWriteOnce PVC — 롤링 시 두 파드가 동시에 마운트하면 안 됨
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+    spec:
+      serviceAccountName: postgres
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - name: postgres
+              containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "duo", "-d", "duo"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "duo", "-d", "duo"]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data
+        - name: initdb
+          configMap:
+            name: postgres-initdb
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres
+  namespace: gamehouse
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+  namespace: gamehouse
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: user
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: post
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: chat
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: match
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: crew
+      ports:
+        - protocol: TCP
+          port: 5432

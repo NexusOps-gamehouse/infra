@@ -1,0 +1,8 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: chat
+  namespace: gamehouse
+spec:
+  minReplicas: 1
+  maxReplicas: 2

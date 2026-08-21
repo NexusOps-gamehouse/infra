@@ -1,0 +1,64 @@
+# dev — kind + ingress-nginx. 섹션10 "Ingress 경로" 표를 그대로 옮긴다.
+# 사전 준비:
+#   1) kind cluster 가 ingress-nginx 를 설치하고 있어야 한다(80/443 hostPort 매핑은
+#      ../../../kind-config.yaml 참고).
+#   2) /etc/hosts 에 `127.0.0.1 gamehouse.local` 추가.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gamehouse
+  namespace: gamehouse
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"   # /ws 장시간 연결 유지
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: gamehouse.local
+      http:
+        paths:
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          - path: /api/users
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          - path: /api/friends
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          - path: /api/notifications
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          - path: /api/posts
+            pathType: Prefix
+            backend:
+              service: { name: post, port: { number: 8080 } }
+          - path: /api/applications
+            pathType: Prefix
+            backend:
+              service: { name: post, port: { number: 8080 } }
+          - path: /api/chat
+            pathType: Prefix
+            backend:
+              service: { name: chat, port: { number: 8080 } }
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service: { name: chat, port: { number: 8080 } }
+          - path: /api/match
+            pathType: Prefix
+            backend:
+              service: { name: match, port: { number: 8080 } }
+          - path: /api/crews
+            pathType: Prefix
+            backend:
+              service: { name: crew, port: { number: 8080 } }
+          # riot 은 외부 노출 없음 — 의도적으로 경로가 없다.
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: frontend, port: { number: 5173 } }
