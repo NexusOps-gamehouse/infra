@@ -58,6 +58,16 @@ spec:
               command: ["redis-cli", "ping"]
             initialDelaySeconds: 10
             periodSeconds: 20
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      securityContext:
+        fsGroup: 1000   # redis 이미지의 redis 계정은 gid 만 1000 이다
+        seccompProfile:
+          type: RuntimeDefault
   volumeClaimTemplates:
     - metadata:
         name: data

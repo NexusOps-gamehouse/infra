@@ -122,12 +122,15 @@ spec:
             failureThreshold: 3
           securityContext:
             runAsNonRoot: true
+            runAsUser: 999   # 이미지의 spring 계정(uid 999) — 이름으로는 kubelet 이 검증 못 한다
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false  # UPLOAD_DIR(user/post) · 임시파일 쓰기 때문에 유지
             capabilities:
               drop: ["ALL"]
       securityContext:
-        fsGroup: 1000
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname

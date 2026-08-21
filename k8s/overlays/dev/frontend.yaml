@@ -51,6 +51,16 @@ spec:
               path: /
               port: http
             periodSeconds: 20
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      securityContext:
+        fsGroup: 1000   # node:24-alpine 의 node 계정
+        seccompProfile:
+          type: RuntimeDefault
 ---
 apiVersion: v1
 kind: ServiceAccount

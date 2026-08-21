@@ -97,6 +97,16 @@ spec:
               command: ["pg_isready", "-U", "duo", "-d", "duo"]
             initialDelaySeconds: 15
             periodSeconds: 15
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      securityContext:
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       volumes:
         - name: data
           persistentVolumeClaim:
