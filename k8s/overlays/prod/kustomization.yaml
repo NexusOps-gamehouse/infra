@@ -27,26 +27,27 @@ resources:
   - external-secrets/external-secret-db-user.yaml
   - external-secrets/external-secret-db-post.yaml
   - external-secrets/external-secret-db-chat.yaml
-  - external-secrets/external-secret-db-match.yaml
-  - external-secrets/external-secret-db-crew.yaml
+  # match / crew — base/kustomization.yaml 에서 제외됨. 되살릴 때 같이 푼다.
+  # - external-secrets/external-secret-db-match.yaml
+  # - external-secrets/external-secret-db-crew.yaml
 
 patches:
   - path: patches/configmap-user.yaml
   - path: patches/configmap-post.yaml
   - path: patches/configmap-chat.yaml
-  - path: patches/configmap-match.yaml
-  - path: patches/configmap-crew.yaml
+  # - path: patches/configmap-match.yaml
+  # - path: patches/configmap-crew.yaml
   - path: patches/configmap-riot.yaml
   - path: patches/serviceaccount-user.yaml
   - path: patches/serviceaccount-post.yaml
   - path: patches/replicas-user.yaml
   - path: patches/replicas-post.yaml
   - path: patches/replicas-chat.yaml
-  - path: patches/replicas-match.yaml
-  - path: patches/replicas-crew.yaml
+  # - path: patches/replicas-match.yaml
+  # - path: patches/replicas-crew.yaml
   - path: patches/replicas-riot.yaml
   - path: patches/hpa-chat.yaml
-  - path: patches/hpa-match.yaml
+  # - path: patches/hpa-match.yaml
   # base 의 placeholder Secret 삭제 — ExternalSecret 이 같은 이름으로 다시 만든다.
   - path: patches/delete-secret-jwt.yaml
   - path: patches/delete-secret-rabbitmq.yaml
@@ -54,8 +55,8 @@ patches:
   - path: patches/delete-secret-user-db.yaml
   - path: patches/delete-secret-post-db.yaml
   - path: patches/delete-secret-chat-db.yaml
-  - path: patches/delete-secret-match-db.yaml
-  - path: patches/delete-secret-crew-db.yaml
+  # - path: patches/delete-secret-match-db.yaml
+  # - path: patches/delete-secret-crew-db.yaml
 
 images:
   - name: nexusops0713/gamehouse-user
@@ -64,10 +65,10 @@ images:
     newTag: REPLACE_AT_DEPLOY
   - name: nexusops0713/gamehouse-chat
     newTag: REPLACE_AT_DEPLOY
-  - name: nexusops0713/gamehouse-match
-    newTag: REPLACE_AT_DEPLOY
-  - name: nexusops0713/gamehouse-crew
-    newTag: REPLACE_AT_DEPLOY
+  # - name: nexusops0713/gamehouse-match
+  #   newTag: REPLACE_AT_DEPLOY
+  # - name: nexusops0713/gamehouse-crew
+  #   newTag: REPLACE_AT_DEPLOY
   - name: nexusops0713/gamehouse-riot
     newTag: REPLACE_AT_DEPLOY
   - name: nexusops0713/gamehouse-rabbitmq

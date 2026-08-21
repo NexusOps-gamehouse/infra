@@ -13,25 +13,26 @@ patches:
   - path: patches/configmap-user.yaml
   - path: patches/configmap-post.yaml
   - path: patches/configmap-chat.yaml
-  - path: patches/configmap-match.yaml
-  - path: patches/configmap-crew.yaml
+  # match / crew — base/kustomization.yaml 에서 제외됨. 되살릴 때 같이 푼다.
+  # - path: patches/configmap-match.yaml
+  # - path: patches/configmap-crew.yaml
   - path: patches/configmap-riot.yaml
   - path: patches/secret-db-user.yaml
   - path: patches/secret-db-post.yaml
   - path: patches/secret-db-chat.yaml
-  - path: patches/secret-db-match.yaml
-  - path: patches/secret-db-crew.yaml
+  # - path: patches/secret-db-match.yaml
+  # - path: patches/secret-db-crew.yaml
   - path: patches/secret-jwt.yaml
   - path: patches/secret-rabbitmq.yaml
   - path: patches/secret-riot.yaml
   - path: patches/replicas-user.yaml
   - path: patches/replicas-post.yaml
   - path: patches/replicas-chat.yaml
-  - path: patches/replicas-match.yaml
-  - path: patches/replicas-crew.yaml
+  # - path: patches/replicas-match.yaml
+  # - path: patches/replicas-crew.yaml
   - path: patches/replicas-riot.yaml
   - path: patches/hpa-chat.yaml
-  - path: patches/hpa-match.yaml
+  # - path: patches/hpa-match.yaml
 
 # 이미지 태그는 base 기본값(<service>-... 아니라 <service 별 레포>:develop)을 그대로 쓴다.
 # dev 에서 특정 브랜치/커밋 이미지를 테스트하려면 여기 images: 를 추가하는 대신

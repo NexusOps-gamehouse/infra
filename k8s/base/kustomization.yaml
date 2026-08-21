@@ -1,4 +1,4 @@
-# k8s/base — 6개 서비스 + rabbitmq + redis + 네임스페이스 전역 정책/시크릿을 모두 모은다.
+# k8s/base — 서비스(현재 4개) + rabbitmq + redis + 네임스페이스 전역 정책/시크릿을 모두 모은다.
 # overlays/dev, overlays/prod 가 각각 이 base 를 참조해 환경별 값을 patch 한다.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -10,9 +10,13 @@ resources:
   - user
   - post
   - chat
-  - match
-  - crew
   - riot
+  # match / crew 는 backend 에 아직 모듈이 없다(settings.gradle 참고).
+  # 매니페스트는 base/match, base/crew 에 그대로 있으니 코드가 생기면
+  # 아래 두 줄만 살리면 된다. 이미지 없이 올려 두면 상시 ImagePullBackOff 가
+  # 되어, prod 에서 CI 누락을 잡아내려고 만든 ImagePullBackOff 신호를 죽인다.
+  # - match
+  # - crew
   - rabbitmq
   - redis
 

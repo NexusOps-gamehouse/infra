@@ -31,7 +31,9 @@ echo "[3/4] GameHouse MSA 매니페스트 적용 (overlays/dev)..."
 kubectl apply -k "${INFRA_DIR}/k8s/overlays/dev"
 
 echo "[4/4] 롤아웃 대기..."
-for svc in user post chat match crew riot; do
+# match / crew 는 base/kustomization.yaml 에서 빠져 있다 — 여기 두면 없는
+# Deployment 를 180초씩 기다리다 만다. match / crew 는 추후 추가한다.
+for svc in user post chat riot; do
   kubectl -n gamehouse rollout status deployment/"${svc}" --timeout=180s || true
 done
 
