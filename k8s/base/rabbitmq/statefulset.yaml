@@ -65,12 +65,16 @@ spec:
             exec:
               command: ["rabbitmq-diagnostics", "-q", "ping"]
             initialDelaySeconds: 20
-            periodSeconds: 10
+            periodSeconds: 15
+            # rabbitmq-diagnostics 는 Erlang VM 을 띄워 노드에 붙는다.
+            # 기본 timeoutSeconds(1초)로는 항상 타임아웃난다.
+            timeoutSeconds: 10
           livenessProbe:
             exec:
               command: ["rabbitmq-diagnostics", "-q", "ping"]
             initialDelaySeconds: 30
-            periodSeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 10
           securityContext:
             runAsNonRoot: true
             runAsUser: 999
