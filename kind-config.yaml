@@ -1,0 +1,22 @@
+# dev 클러스터 — `kind create cluster --config kind-config.yaml --name gamehouse-dev`
+#
+# 워커 노드 없이 컨트롤플레인 1개 + ingress-nginx 용 포트 매핑만 둔다.
+# extraPortMappings 로 호스트 80/443 을 노드로 흘려보내야 ingress-nginx 의
+# NodePort/HostPort 서비스가 로컬 브라우저에서 http://gamehouse.local 로 붙는다.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP
