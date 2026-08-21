@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: riot-config
+  namespace: gamehouse
+data:
+  ENV_NAME: "prod"

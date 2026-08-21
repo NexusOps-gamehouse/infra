@@ -1,0 +1,73 @@
+# prod — EKS + AWS Load Balancer Controller(ALB). frontend 는 없다 — S3+CloudFront 가
+# 정적 자산을 서빙하고, CloudFront가 /api·/ws 만 이 ALB(오리진)로 넘긴다.
+# 그래서 dev/ingress.yaml 에 있던 "/" → frontend 규칙이 여기엔 없다.
+#
+# 사전 준비:
+#   - AWS Load Balancer Controller 설치 (IRSA 필요, 이 kustomize 트리 범위 밖)
+#   - ACM 인증서 발급 후 certificate-arn 교체
+#   - group.name 으로 5개 서비스가 ALB 하나를 공유한다(서비스마다 ALB 를 새로 만들면
+#     시간당 비용이 5배가 된다)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gamehouse
+  namespace: gamehouse
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/group.name: gamehouse
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}, {"HTTP":80}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    # ⚠️ CHANGE_ME: ACM 인증서 ARN
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-northeast-2:CHANGE_ME_ACCOUNT_ID:certificate/CHANGE_ME
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
+    alb.ingress.kubernetes.io/healthcheck-port: "8081"
+    # chat 은 WebSocket(STOMP) 이라 유휴 타임아웃을 늘린다 — 기본 60s 면 끊긴다.
+    alb.ingress.kubernetes.io/target-group-attributes: stickiness.enabled=false,deregistration_delay.timeout_seconds=30
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          - path: /api/users
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          - path: /api/friends
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          - path: /api/notifications
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          - path: /api/posts
+            pathType: Prefix
+            backend:
+              service: { name: post, port: { number: 8080 } }
+          - path: /api/applications
+            pathType: Prefix
+            backend:
+              service: { name: post, port: { number: 8080 } }
+          - path: /api/chat
+            pathType: Prefix
+            backend:
+              service: { name: chat, port: { number: 8080 } }
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service: { name: chat, port: { number: 8080 } }
+          - path: /api/match
+            pathType: Prefix
+            backend:
+              service: { name: match, port: { number: 8080 } }
+          - path: /api/crews
+            pathType: Prefix
+            backend:
+              service: { name: crew, port: { number: 8080 } }
+          # riot 은 외부 노출 없음 — 의도적으로 경로가 없다.

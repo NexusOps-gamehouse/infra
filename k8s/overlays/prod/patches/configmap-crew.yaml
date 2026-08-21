@@ -1,0 +1,9 @@
+# ⚠️ CHANGE_ME: 실제 RDS 엔드포인트로 교체.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crew-config
+  namespace: gamehouse
+data:
+  DB_HOST: "CHANGE_ME.xxxxxxxxxxxx.ap-northeast-2.rds.amazonaws.com"
+  ENV_NAME: "prod"

@@ -1,0 +1,79 @@
+# prod — EKS + ALB + RDS. frontend 없음(S3+CloudFront).
+#
+# 배포 전 필수 준비물 (이 kustomize 트리 밖):
+#   1) EKS 클러스터 + AWS Load Balancer Controller + External Secrets Operator 설치
+#   2) RDS(PostgreSQL) 인스턴스 생성 + user_/post_/chat_/match_/crew_ 스키마와
+#      서비스별 DB 계정 생성 (섹션11 — "자기 스키마만 읽고 쓴다")
+#   3) AWS Secrets Manager 에 gamehouse/prod/jwt, gamehouse/prod/rabbitmq,
+#      gamehouse/prod/riot, gamehouse/prod/db/<service> 시크릿 등록
+#   4) IAM 역할 4종(gamehouse-user-role, gamehouse-post-role, gamehouse-external-secrets-role,
+#      AWS Load Balancer Controller 역할) 생성 후 이 디렉터리의 CHANGE_ME 를 실제 값으로 교체
+#   5) 이미지 태그 고정 — 아래 images: 의 REPLACE_AT_DEPLOY 를 CI 가 실제 커밋 SHA로
+#      바꾼다(고의로 존재하지 않는 태그를 기본값으로 둬서, 안 바꾸고 배포하면
+#      ImagePullBackOff 로 "눈에 띄게" 실패하게 만들었다 — 조용히 develop 이미지가
+#      prod 에 깔리는 사고를 막기 위함).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - ingress.yaml
+  - pdb.yaml
+  - external-secrets/serviceaccount.yaml
+  - external-secrets/cluster-secret-store.yaml
+  - external-secrets/external-secret-jwt.yaml
+  - external-secrets/external-secret-rabbitmq.yaml
+  - external-secrets/external-secret-riot.yaml
+  - external-secrets/external-secret-db-user.yaml
+  - external-secrets/external-secret-db-post.yaml
+  - external-secrets/external-secret-db-chat.yaml
+  - external-secrets/external-secret-db-match.yaml
+  - external-secrets/external-secret-db-crew.yaml
+
+patches:
+  - path: patches/configmap-user.yaml
+  - path: patches/configmap-post.yaml
+  - path: patches/configmap-chat.yaml
+  - path: patches/configmap-match.yaml
+  - path: patches/configmap-crew.yaml
+  - path: patches/configmap-riot.yaml
+  - path: patches/serviceaccount-user.yaml
+  - path: patches/serviceaccount-post.yaml
+  - path: patches/replicas-user.yaml
+  - path: patches/replicas-post.yaml
+  - path: patches/replicas-chat.yaml
+  - path: patches/replicas-match.yaml
+  - path: patches/replicas-crew.yaml
+  - path: patches/replicas-riot.yaml
+  - path: patches/hpa-chat.yaml
+  - path: patches/hpa-match.yaml
+  # base 의 placeholder Secret 삭제 — ExternalSecret 이 같은 이름으로 다시 만든다.
+  - path: patches/delete-secret-jwt.yaml
+  - path: patches/delete-secret-rabbitmq.yaml
+  - path: patches/delete-secret-riot.yaml
+  - path: patches/delete-secret-user-db.yaml
+  - path: patches/delete-secret-post-db.yaml
+  - path: patches/delete-secret-chat-db.yaml
+  - path: patches/delete-secret-match-db.yaml
+  - path: patches/delete-secret-crew-db.yaml
+
+images:
+  - name: nexusops0713/gamehouse-user
+    newTag: REPLACE_AT_DEPLOY
+  - name: nexusops0713/gamehouse-post
+    newTag: REPLACE_AT_DEPLOY
+  - name: nexusops0713/gamehouse-chat
+    newTag: REPLACE_AT_DEPLOY
+  - name: nexusops0713/gamehouse-match
+    newTag: REPLACE_AT_DEPLOY
+  - name: nexusops0713/gamehouse-crew
+    newTag: REPLACE_AT_DEPLOY
+  - name: nexusops0713/gamehouse-riot
+    newTag: REPLACE_AT_DEPLOY
+  - name: nexusops0713/gamehouse-rabbitmq
+    newTag: REPLACE_AT_DEPLOY
+
+labels:
+  - pairs:
+      app.kubernetes.io/environment: prod
+    includeSelectors: true
