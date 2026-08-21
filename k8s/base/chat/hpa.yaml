@@ -1,0 +1,30 @@
+# 이 파일은 GameHouse MSA 설계 문서(디렉터리 구조 섹션 10)를 기준으로 생성되었다.
+# 실제 값(이미지 태그, 리소스 상한, 시크릿)은 overlay 에서 환경별로 덮어쓴다.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: chat
+  namespace: gamehouse
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: chat
+  minReplicas: 2
+  maxReplicas: 6
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300   # WebSocket 연결이 끊기지 않도록 스케일다운을 천천히
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
