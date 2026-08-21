@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gamehouse
+  labels:
+    app.kubernetes.io/part-of: gamehouse
+    # Pod Security Standards — MSA 서비스는 전부 non-root 컨테이너라 restricted 로 강제한다.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

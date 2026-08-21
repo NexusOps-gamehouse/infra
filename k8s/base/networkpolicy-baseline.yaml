@@ -1,0 +1,15 @@
+# default-deny — 네임스페이스의 모든 파드에 적용된다(podSelector: {}).
+# NetworkPolicy 는 합집합(additive)으로 동작하므로, 여기서 전부 막아 놓고
+# 각 서비스 디렉터리의 networkpolicy.yaml 이 필요한 통신만 다시 열어준다.
+# 새 서비스를 추가했는데 자기 networkpolicy.yaml 을 안 만들면 "아무것도 못 하는" 파드가 된다 —
+# 이게 의도한 동작이다(fail closed).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: gamehouse
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
