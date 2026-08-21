@@ -13,7 +13,7 @@ infra/
 │   │                         3~5단계까지는 모놀리스가 여전히 compose 로 돈다)
 │   └── k8s-dev-up.sh         ★ kind 클러스터 생성 + ingress-nginx + overlays/dev 적용
 └── k8s/
-    ├── base/                 서비스 6개 + rabbitmq + redis + 네임스페이스 전역 정책
+    ├── base/                 서비스(현재 4개) + rabbitmq + redis + 네임스페이스 전역 정책
     └── overlays/
         ├── dev/               kind + ingress-nginx + in-cluster postgres + frontend Pod
         └── prod/               EKS + ALB + RDS + External Secrets (frontend 없음)
@@ -31,23 +31,50 @@ kubectl apply -k k8s/overlays/dev
 prod 는 CI 파이프라인에서:
 ```bash
 cd k8s/overlays/prod
-kustomize edit set image nexusops0713/gamehouse-user=nexusops0713/gamehouse-user:$GIT_SHA
-kustomize edit set image nexusops0713/gamehouse-post=nexusops0713/gamehouse-post:$GIT_SHA
-# ... 나머지 5개(chat/match/crew/riot/rabbitmq)도 동일하게
+kustomize edit set image gamehouse-user=nexusops0713/gamehouse:user-$GIT_SHA
+kustomize edit set image gamehouse-post=nexusops0713/gamehouse:post-$GIT_SHA
+# ... 나머지(chat/riot/rabbitmq)도 동일하게. match/crew 는 아직 대상이 아니다.
 kubectl apply -k .
 ```
-`images:` 의 기본 태그를 일부러 존재하지 않는 `REPLACE_AT_DEPLOY` 로 박아 뒀다 — CI가
-이 단계를 빼먹으면 `ImagePullBackOff` 로 바로 드러나게 하기 위해서다(조용히 dev 이미지가
-prod 에 깔리는 사고 방지).
+왼쪽 `gamehouse-user` 는 도커허브 주소가 아니라 **base 가 쓰는 매칭 키**다(아래
+"이미지 참조" 항목 참고). 오른쪽이 CI가 실제로 푸시하는 좌표다.
+
+`images:` 의 기본 태그를 일부러 존재하지 않는 `<service>-REPLACE_AT_DEPLOY` 로 박아
+뒀다 — CI가 이 단계를 빼먹으면 `ImagePullBackOff` 로 바로 드러나게 하기 위해서다
+(조용히 dev 이미지가 prod 에 깔리는 사고 방지).
 
 ## 설계 결정과 그 이유
 
-**이미지 레포를 서비스마다 분리했다** (`nexusops0713/gamehouse-user`,
-`nexusops0713/gamehouse-post`, …). 기존 docker-compose 는 레포 하나에
-`backend-develop`/`frontend-develop` 처럼 태그로 구분했는데, kustomize 의 `images:`
-트랜스포머는 레포 이름으로만 매칭하고 태그 접두사는 구분하지 못한다. 한 레포에
-`<service>-develop` 식으로 두면 서비스 하나만 콕 집어 이미지를 바꾸는 게 안 된다.
-CI 워크플로도 `backend/<service>/` 각각을 독립 Docker 빌드 컨텍스트로 만들어야 한다.
+**이미지 참조 — base 는 논리 이름, 오버레이가 실제 레포로 매핑한다.**
+CI(`backend`·`frontend` 의 `ci-cd.yml`)는 레포 하나에 서비스를 태그 접두사로 구분해
+푸시한다 — `nexusops0713/gamehouse:user-develop`, `:user-<sha>` 형태다.
+
+이 좌표를 base 에 그대로 쓰면 안 된다. kustomize 의 `images:` 트랜스포머는 레포
+이름으로만 매칭하고 태그 접두사는 구분하지 못하므로, 서비스가 전부 같은 레포를
+쓰면 항목 하나가 전부를 덮어쓴다. `user` 파드에 `chat` 이미지가 깔리는데 에러도
+경고도 없이 조용히 일어난다.
+
+그래서 base 는 서비스별 **논리 이름**(`gamehouse-user:develop`)을 쓰고, 오버레이가
+실제 좌표를 만든다.
+
+```yaml
+# overlays/prod/kustomization.yaml
+- name: gamehouse-user                 # base 의 매칭 키 (출력에 안 나옴)
+  newName: nexusops0713/gamehouse      # 실제 레포
+  newTag: user-REPLACE_AT_DEPLOY       # 실제 태그
+```
+
+덤으로 로컬 kind 개발이 단순해진다. base 의 이름이 그대로 로컬 빌드 태그가 되므로
+레지스트리·인증이 필요 없다. Apple Silicon 에서는 이 경로가 사실상 유일하다 —
+CI 이미지는 `platforms: linux/amd64` 단일 빌드라 arm64 노드에서 pull 이 실패한다.
+
+```bash
+cd backend
+docker build -t gamehouse-user:develop -f user/Dockerfile .   # 컨텍스트는 backend/ 루트
+kind load docker-image gamehouse-user:develop --name gamehouse-dev
+```
+
+자세한 근거와 재현은 `task/k8s/kustomize-images-트랜스포머.md` 참고.
 
 **네임스페이스는 dev/prod 모두 `gamehouse` 하나.** 클러스터 자체가 다르므로(kind vs
 EKS) 이름이 겹칠 일이 없다. 이름을 환경별로 나누면(`gamehouse-dev`/`gamehouse-prod`)
@@ -93,11 +120,26 @@ grep -rn "CHANGE_ME" k8s/overlays/prod
 
 - ACM 인증서 ARN (`overlays/prod/ingress.yaml`)
 - IAM 계정 ID / 역할 ARN 4종 — user, post, external-secrets, (ALB 컨트롤러는 트리 밖)
-- RDS 엔드포인트 (`overlays/prod/patches/configmap-*.yaml`)
+- RDS 엔드포인트 — 저장소에 두지 않는다. AWS Secrets Manager 의
+  `gamehouse/prod/db/<service>` JSON 에 `DB_HOST` 키로 넣으면
+  `ExternalSecret` 이 받아 온다. 호스트명 자체는 자격증명이 아니지만 AWS 계정
+  식별자·리전·인스턴스명이 드러나므로 커밋하지 않는다.
 - AWS Secrets Manager 에 `gamehouse/prod/jwt`, `gamehouse/prod/rabbitmq`,
-  `gamehouse/prod/riot`, `gamehouse/prod/db/<service>` 등록
+  `gamehouse/prod/riot`, `gamehouse/prod/db/<service>` 등록.
+  db 항목은 `{ "DB_HOST": ..., "DB_USERNAME": ..., "DB_PASSWORD": ... }` 세 키다.
 - 실제 도메인 — 지금 `CORS_ALLOWED_ORIGINS` 는 `https://gamehouse.example.com`
   placeholder(`base/<service>/configmap.yaml`)
+
+## match / crew
+
+`base/match`, `base/crew` 에 매니페스트가 있지만 `base/kustomization.yaml` 의
+`resources:` 에서는 주석 처리해 뒀다. backend 에 아직 모듈이 없어서
+(`settings.gradle` 참고) 이미지가 존재하지 않는다.
+
+올려 두면 파드 2개가 상시 `ImagePullBackOff` 로 남아 `kubectl get pods` 에 빨간
+줄이 상주하고, 위에서 설계한 "CI가 태그 지정을 빼먹으면 ImagePullBackOff 로
+드러난다"는 신호가 묻힌다. 코드가 생기면 세 트리(`base`, `overlays/dev`,
+`overlays/prod`)의 주석과 `scripts/k8s-dev-up.sh` 의 rollout 루프를 함께 되살린다.
 
 ## 아직 안 한 것 (의도적으로 범위 밖)
 
@@ -106,6 +148,11 @@ grep -rn "CHANGE_ME" k8s/overlays/prod
 - Observability(Prometheus/Grafana) 의 k8s 버전 — 현재 `infra/docker-compose.observability.yml`
   은 EC2 전용. 각 서비스 Deployment 에 `prometheus.io/scrape` 애노테이션은 이미
   붙여 놨으니, kube-prometheus-stack 같은 걸 얹으면 바로 스크레이프된다.
+- **rabbitmq 이미지를 푸시하는 CI** — `infra/.github/workflows/ci-cd.yml` 은
+  docker-compose 검증만 하고, compose 는 `build: ../infra/rabbitmq` 로 로컬 빌드한다.
+  EC2 에서는 그래도 됐지만 EKS 는 레지스트리에서 당겨야 하므로 build-push 잡이
+  필요하다. 그때까지 `overlays/prod` 의 `gamehouse-rabbitmq` 매핑은 당길 수 없는
+  좌표를 가리킨다.
 - 백엔드 자체의 Gradle 멀티모듈 분리(섹션13) — 이건 이 인프라 작업과 별개로
   `backend/` 리포에서 진행해야 한다.
 - `UPLOAD_DIR`(현재 모놀리스의 로컬 파일 업로드) 관련 볼륨을 user/post Deployment 에
