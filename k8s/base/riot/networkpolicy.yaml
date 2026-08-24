@@ -23,12 +23,12 @@ spec:
               app.kubernetes.io/name: match
       ports:
         - protocol: TCP
-          port: 8080
+          port: 8084
     - from:
         - namespaceSelector: {}
       ports:
         - protocol: TCP
-          port: 8081
+          port: 8184
   egress:
     # DNS
     - to:

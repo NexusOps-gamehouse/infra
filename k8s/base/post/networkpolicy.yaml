@@ -16,17 +16,17 @@ spec:
     # 외부(Ingress/ALB)에서 8080 으로 들어오는 트래픽을 허용한다.
     # nginx-ingress(dev) 든 ALB IP-target(prod) 든 클러스터 관점에선 "어딘가에서 들어오는
     # 8080 요청"이라 소스를 좁히기 어렵다 — 실제 경계는 인그레스 자체(경로 라우팅)와
-    # (prod) RDS/ALB 보안그룹이 담당한다. 여기서는 포트만 8080/8081 로 제한한다.
+    # (prod) RDS/ALB 보안그룹이 담당한다. 여기서는 포트만 8082(HTTP)/8182(actuator) 로 제한한다.
     - from: []
       ports:
         - protocol: TCP
-          port: 8080
+          port: 8082
     # 클러스터 내부(Prometheus 등)의 actuator 스크레이프
     - from:
         - namespaceSelector: {}
       ports:
         - protocol: TCP
-          port: 8081
+          port: 8182
   egress:
     # DNS
     - to:
@@ -60,4 +60,4 @@ spec:
               app.kubernetes.io/name: user
       ports:
         - protocol: TCP
-          port: 8080
+          port: 8081

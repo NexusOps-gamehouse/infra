@@ -7,6 +7,7 @@ metadata:
   namespace: gamehouse
 data:
   SPRING_PROFILES_ACTIVE: "k8s"
+  # 다른 서비스를 호출하지 않는다 — services.*.base-url 을 참조하는 코드가 없다.
   ENV_NAME: "local"
   CORS_ALLOWED_ORIGINS: "https://gamehouse.example.com"
   REDIS_HOST: "redis.gamehouse.svc.cluster.local"

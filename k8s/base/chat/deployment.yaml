@@ -27,10 +27,16 @@ spec:
         app.kubernetes.io/part-of: gamehouse
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "8081"
+        prometheus.io/port: "8183"
         prometheus.io/path: "/actuator/prometheus"
     spec:
       serviceAccountName: chat
+      # k8s 는 네임스페이스의 Service 마다 도커 링크 호환용 환경변수를 자동 주입한다
+      # (rabbitmq Service → RABBITMQ_PORT=tcp://10.96.99.238:5672).
+      # Spring 의 relaxed binding 이 이걸 rabbitmq.port 로 읽어버려
+      # @Value("${rabbitmq.port}") int relayPort 가 int 변환에서 죽는다.
+      # 환경변수는 application.yml 보다 우선순위가 높아 조용히 덮어쓴다.
+      enableServiceLinks: false
       # rabbitmq/redis 등 스테이트풀 의존성보다 먼저 뜨는 걸 막기 위해
       # 실제 기동 순서는 Spring 의 재시도(backoff)에 맡긴다 — initContainer 로
       # 강하게 막지 않는 이유는 순서 강제가 오히려 배포 시간을 늘리기 때문이다.
@@ -41,9 +47,9 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
-              containerPort: 8080
+              containerPort: 8083
             - name: mgmt
-              containerPort: 8081
+              containerPort: 8183
           envFrom:
             - configMapRef:
                 name: chat-config
@@ -61,14 +67,14 @@ spec:
                   name: chat-db-credentials
                   key: DB_HOST
             - name: DB_URL
-              value: "jdbc:postgresql://$(DB_HOST):$(DB_PORT)/$(DB_NAME)?currentSchema=chat_"
+              value: "jdbc:postgresql://$(DB_HOST):$(DB_PORT)/$(DB_NAME)?currentSchema=chat_svc"
 
-            - name: DB_USERNAME
+            - name: CHAT_DB_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: chat-db-credentials
                   key: DB_USERNAME
-            - name: DB_PASSWORD
+            - name: CHAT_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: chat-db-credentials

@@ -7,6 +7,10 @@ metadata:
   namespace: gamehouse
 data:
   SPRING_PROFILES_ACTIVE: "k8s"
+  # 실제로 호출하는 서비스만 넣는다. 여기 없는 주소는 NetworkPolicy 도 막혀 있다
+  # (base/<svc>/networkpolicy.yaml 의 egress 와 짝을 이룬다).
+  # 파드는 8081~8084 를 열지만 Service 가 targetPort 로 8080 에 매핑한다.
+  RIOT_SERVICE_URL: "http://riot:8080"
   ENV_NAME: "local"
   CORS_ALLOWED_ORIGINS: "https://gamehouse.example.com"
   DB_PORT: "5432"
