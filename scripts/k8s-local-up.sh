@@ -47,7 +47,7 @@ kubectl -n kube-system rollout status deployment/metrics-server --timeout=180s
 
 echo "[4/6] 로컬 이미지 적재..."
 # overlays/local 은 레지스트리를 타지 않는다 — 호스트에서 빌드한 이미지를 노드에
-# 직접 넣어야 파드가 뜬다. 여기서 안 넣고 apply 하면 [5/5] 가 ErrImageNeverPull 인
+# 직접 넣어야 파드가 뜬다. 여기서 안 넣고 apply 하면 [6/6] 이 ErrImageNeverPull 인
 # 파드를 서비스마다 180초씩 기다리다 만다.
 MISSING=()
 for img in user post chat riot frontend rabbitmq; do
@@ -61,7 +61,7 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   echo
   echo "  ⚠️  아래 이미지가 호스트에 없다 — 해당 파드는 ErrImageNeverPull 로 남는다:"
   printf '       %s\n' "${MISSING[@]}"
-  echo "     빌드 방법은 k8s/README.md 의 \"로컬(kind)에서 띄우기 → 1. 이미지 빌드\" 참고."
+  echo "     backend/ 루트에서: docker build -t gamehouse:<svc>-develop -f <svc>/Dockerfile ."
   echo
 fi
 

@@ -80,7 +80,7 @@ images:
   #   kustomize edit set image gamehouse-user=nexusops0713/gamehouse:user-$GIT_SHA
   #
   # base 가 실제 레포 대신 논리 이름(gamehouse-user 등)을 쓰는 이유는
-  # k8s/README.md "이미지 참조" 항목 참고 — 4개 서비스가 레포 하나를 태그 접두사로
+  # 4개 서비스가 레포 하나를 태그 접두사로
   # 공유하므로, base 에 실제 레포명을 쓰면 서비스 하나만 골라 태그를 바꿀 수 없다.
   - name: gamehouse-user
     newName: nexusops0713/gamehouse
@@ -100,7 +100,9 @@ images:
   - name: gamehouse-riot
     newName: nexusops0713/gamehouse
     newTag: riot-REPLACE_AT_DEPLOY
-  # ⚠️ rabbitmq 는 이미지를 푸시하는 CI 가 아직 없다(k8s/README.md 참고).
+  # ⚠️ rabbitmq 는 이미지를 푸시하는 CI 가 아직 없다 — infra/.github/workflows/ci-cd.yml
+  #    은 docker-compose 검증만 하고, compose 는 rabbitmq 를 build: 로 로컬 빌드한다.
+  #    EKS 는 레지스트리에서 당겨야 하므로 build-push 잡을 먼저 추가해야 한다.
   #    dev 에 올리려면 infra CI 에 build-push 잡을 먼저 추가해야 한다.
   - name: gamehouse-rabbitmq
     newName: nexusops0713/gamehouse

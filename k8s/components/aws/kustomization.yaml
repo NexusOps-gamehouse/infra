@@ -9,7 +9,7 @@
 #   상속하면 prod 의 images: 트랜스포머가 먼저 돌아 gamehouse-user·gamehouse-post 가
 #   전부 nexusops0713/gamehouse 로 바뀐 뒤에 dev 가 매칭을 시도하게 된다. images:
 #   트랜스포머는 레포 이름으로만 매칭하므로 dev 에서는 서비스를 개별 지정할 수 없다
-#   (k8s/README.md "이미지 참조" 항목의 그 충돌이 그대로 재현된다).
+#   images: 트랜스포머는 레포 이름으로만 매칭하므로 서비스를 개별 지정할 수 없게 된다.
 #   component 는 트랜스포머를 상속하지 않으므로 각 오버레이가 base 의 논리 이름
 #   (gamehouse-user 등)에 직접 매칭할 수 있다.
 #

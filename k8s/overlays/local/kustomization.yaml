@@ -44,9 +44,17 @@ patches:
 
 # 로컬 이미지는 하나의 `gamehouse` 저장소에 서비스별 태그를 붙인다
 # (`gamehouse:<service>-develop`). base 의 서비스별 논리 이름을 이 좌표로 변환한다.
+# CI 가 도커허브에 푸시하는 형태(nexusops0713/gamehouse:<svc>-<sha>)와 같은 모양이고,
+# 레지스트리 접두사만 없다.
+#
 # local 에서 특정 브랜치/커밋 이미지를 테스트하려면 여기 images: 를 추가하는 대신
-  # `kustomize edit set image gamehouse-user=gamehouse:user-<tag>` 처럼
-# 서비스별로 개별 지정한다 — 레포가 서비스마다 분리돼 있어 안전하다.
+# `kustomize edit set image gamehouse-user=gamehouse:user-<tag>` 처럼 서비스별로
+# 개별 지정한다.
+#
+# 서비스 5개가 같은 레포(`gamehouse`)를 쓰는데도 개별 지정이 되는 이유는, images:
+# 트랜스포머의 매칭 키가 출력 좌표가 아니라 base 의 논리 이름(gamehouse-user 등)이기
+# 때문이다. base 에 실제 레포명을 직접 썼다면 5개가 전부 같은 이름이 되어 항목 하나가
+# 나머지를 덮어쓴다.
 
 images:
   # local 은 로컬에서 빌드해 kind 노드에 직접 적재한 이미지를 쓴다. 레지스트리를 안 탄다.
@@ -56,11 +64,13 @@ images:
   #   kind load docker-image gamehouse:user-develop --name gamehouse-local
   #
   # CI 이미지(nexusops0713/gamehouse:<svc>-develop)를 쓰지 않는 이유가 둘 있다.
-  #   1. 비공개 레포라 imagePullSecrets 가 필요하다 — 아직 없다.
+  #   1. 비공개 레포라 imagePullSecrets 가 필요하다. dev/prod 는 components/aws 가
+  #      해결했지만(ExternalSecret + ServiceAccount 패치), local 은 그 트리를
+  #      include 하지 않으므로 여기엔 없다.
   #   2. CI 가 platforms: linux/amd64 단일 빌드라 arm64 kind 노드에서는
   #      no matching manifest for linux/arm64 로 실패한다.
-  # 둘 다 풀리면 각 항목에 newName: nexusops0713/gamehouse 를 추가하고
-  # newTag 를 <svc>-develop 으로 바꾸면 레지스트리 경로로 전환된다.
+  # 둘 다 풀리면 아래 newName 을 nexusops0713/gamehouse 로 바꾸기만 하면 된다
+  # (newTag 는 이미 CI 와 같은 <svc>-develop 형태다).
   - name: gamehouse-user
     newName: gamehouse
     newTag: user-develop
