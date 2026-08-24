@@ -1,5 +1,5 @@
-# dev 전용 — frontend Dockerfile(node:24-alpine + serve)을 그대로 파드 하나로 띄운다.
-# prod 는 S3+CloudFront 로 정적 호스팅하므로 이 파일은 overlays/dev 에만 존재한다.
+# local 전용 — frontend Dockerfile(node:24-alpine + serve)을 그대로 파드 하나로 띄운다.
+# prod 는 S3+CloudFront 로 정적 호스팅하므로 이 파일은 overlays/local 에만 존재한다.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,15 +7,18 @@ metadata:
   namespace: gamehouse
   labels:
     app.kubernetes.io/name: frontend
+    app.kubernetes.io/managed-by: kustomize
 spec:
   replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: frontend
+      app.kubernetes.io/managed-by: kustomize
   template:
     metadata:
       labels:
         app.kubernetes.io/name: frontend
+        app.kubernetes.io/managed-by: kustomize
     spec:
       serviceAccountName: frontend
       containers:
@@ -76,9 +79,11 @@ metadata:
   namespace: gamehouse
   labels:
     app.kubernetes.io/name: frontend
+    app.kubernetes.io/managed-by: kustomize
 spec:
   selector:
     app.kubernetes.io/name: frontend
+    app.kubernetes.io/managed-by: kustomize
   ports:
     - name: http
       port: 5173
@@ -93,6 +98,7 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: frontend
+      app.kubernetes.io/managed-by: kustomize
   policyTypes:
     - Ingress
   ingress:

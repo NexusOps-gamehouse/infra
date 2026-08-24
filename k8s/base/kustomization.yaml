@@ -1,5 +1,6 @@
 # k8s/base — 서비스(현재 4개) + rabbitmq + redis + 네임스페이스 전역 정책/시크릿을 모두 모은다.
-# overlays/dev, overlays/prod 가 각각 이 base 를 참조해 환경별 값을 patch 한다.
+# overlays/local, overlays/dev, overlays/prod 가 각각 이 base 를 참조해 환경별 값을 patch 한다.
+# dev/prod 는 EKS 공통 구성(components/aws)을 함께 include 한다.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

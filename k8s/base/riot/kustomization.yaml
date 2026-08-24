@@ -9,3 +9,4 @@ resources:
   - networkpolicy.yaml
   - configmap.yaml
   - riot-secret.yaml
+  - hpa.yaml

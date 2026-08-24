@@ -9,3 +9,4 @@ resources:
   - networkpolicy.yaml
   - configmap.yaml
   - db-secret.yaml
+  - hpa.yaml

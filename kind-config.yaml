@@ -1,4 +1,4 @@
-# dev 클러스터 — `kind create cluster --config kind-config.yaml --name gamehouse-dev`
+# local 클러스터 — `kind create cluster --config kind-config.yaml --name gamehouse-local`
 #
 # 워커 노드 없이 컨트롤플레인 1개 + ingress-nginx 용 포트 매핑만 둔다.
 # extraPortMappings 로 호스트 80/443 을 노드로 흘려보내야 ingress-nginx 의

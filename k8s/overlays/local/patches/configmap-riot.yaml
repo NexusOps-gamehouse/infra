@@ -5,4 +5,4 @@ metadata:
   namespace: gamehouse
 data:
   CORS_ALLOWED_ORIGINS: "http://gamehouse.local"
-  ENV_NAME: "dev"
+  ENV_NAME: "local"

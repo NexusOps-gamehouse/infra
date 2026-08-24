@@ -1,4 +1,4 @@
-# dev — kind + ingress-nginx. 섹션10 "Ingress 경로" 표를 그대로 옮긴다.
+# local — kind + ingress-nginx. 섹션10 "Ingress 경로" 표를 그대로 옮긴다.
 # 사전 준비:
 #   1) kind cluster 가 ingress-nginx 를 설치하고 있어야 한다(80/443 hostPort 매핑은
 #      ../../../kind-config.yaml 참고).
@@ -38,6 +38,12 @@ spec:
             backend:
               service: { name: post, port: { number: 8080 } }
           - path: /api/applications
+            pathType: Prefix
+            backend:
+              service: { name: post, port: { number: 8080 } }
+          # 이름과 달리 user 가 아니라 post 소유다 — PostController 의 /api/my/posts,
+          # ApplicationController 의 /api/my/applications ("내가 쓴 글/지원 내역").
+          - path: /api/my
             pathType: Prefix
             backend:
               service: { name: post, port: { number: 8080 } }

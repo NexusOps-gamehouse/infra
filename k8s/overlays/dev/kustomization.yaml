@@ -1,0 +1,112 @@
+# dev — EKS. prod 와 같은 components/aws 를 쓰고 값만 다르다.
+#
+# 이 오버레이의 존재 이유: prod 로 가기 전 리허설이다. local(kind) 은 base 만
+# 검증한다 — ingress-nginx, in-cluster postgres, 더미 Secret 이라 ALB·IRSA·
+# External Secrets·RDS 경로를 한 줄도 밟지 않는다. 그 부분을 여기서 처음이자
+# 마지막으로 틀린다.
+#
+# prod 와 의도적으로 다른 것 (그 외는 전부 같아야 한다):
+#   - AWS 리소스 좌표: ACM/IAM ARN, ALB group.name, Secrets Manager 경로(gamehouse/dev/*)
+#   - 규모: replicas 2(prod 3), HPA 상한 낮춤, chat PDB minAvailable 1
+#   - 도메인: CORS_ALLOWED_ORIGINS
+#
+# 전제(이 트리 밖):
+#   1) dev EKS 클러스터 + AWS Load Balancer Controller + External Secrets Operator
+#      + metrics-server (EKS 기본 탑재가 아니다 — 없으면 HPA 가 <unknown> 으로 멈춘다)
+#   2) dev 전용 RDS(PostgreSQL) + user_/post_/chat_ 스키마와 서비스별 최소권한 계정
+#   3) AWS Secrets Manager 에 gamehouse/dev/jwt, gamehouse/dev/rabbitmq,
+#      gamehouse/dev/riot, gamehouse/dev/db/<service>,
+#      gamehouse/dev/dockerhub 등록
+#      (db 항목은 DB_HOST / DB_USERNAME / DB_PASSWORD 세 키)
+#   4) IAM 역할 3종 + ALB 컨트롤러 역할. dev 역할은 gamehouse/dev/* 만 읽도록 좁힌다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - env-configmap.yaml
+
+components:
+  - ../../components/aws
+
+patches:
+  - path: patches/ingress.yaml
+  - path: patches/serviceaccount-external-secrets.yaml
+  - path: patches/serviceaccount-user.yaml
+  - path: patches/serviceaccount-post.yaml
+  - path: patches/configmap-user.yaml
+  - path: patches/configmap-post.yaml
+  - path: patches/configmap-chat.yaml
+  # match / crew — base/kustomization.yaml 에서 제외됨. 되살릴 때 같이 푼다.
+  # - path: patches/configmap-match.yaml
+  # - path: patches/configmap-crew.yaml
+  - path: patches/configmap-riot.yaml
+  - path: patches/replicas-user.yaml
+  - path: patches/replicas-post.yaml
+  - path: patches/replicas-chat.yaml
+  # - path: patches/replicas-match.yaml
+  # - path: patches/replicas-crew.yaml
+  - path: patches/replicas-riot.yaml
+  - path: patches/hpa-user.yaml
+  - path: patches/hpa-post.yaml
+  - path: patches/hpa-chat.yaml
+  - path: patches/hpa-riot.yaml
+  # - path: patches/hpa-match.yaml
+  - path: patches/pdb-chat.yaml
+
+# components/aws 의 ExternalSecret 경로 `gamehouse/ENV/...` 에서 ENV 세그먼트만
+# env-configmap.yaml 의 값으로 바꾼다. delimiter/index 방식이라 data: 항목이
+# 몇 개든(jwt 1개, rabbitmq 2개, db 3개) 와일드카드 하나로 전부 처리된다 —
+# 항목이 늘어도 여기를 고칠 필요가 없다.
+replacements:
+  - source:
+      kind: ConfigMap
+      name: gamehouse-env
+      fieldPath: data.ENV
+    targets:
+      - select:
+          kind: ExternalSecret
+        fieldPaths:
+          - spec.data.*.remoteRef.key
+        options:
+          delimiter: /
+          index: 1
+
+images:
+  # prod 와 동일하게 CI 가 커밋 SHA 를 박는다. 기본값을 존재하지 않는 태그로 둬서
+  # CI 가 이 단계를 빼먹으면 ImagePullBackOff 로 즉시 드러나게 하는 것도 그대로다.
+  #
+  #   cd k8s/overlays/dev
+  #   kustomize edit set image gamehouse-user=nexusops0713/gamehouse:user-$GIT_SHA
+  #
+  # base 가 실제 레포 대신 논리 이름(gamehouse-user 등)을 쓰는 이유는
+  # k8s/README.md "이미지 참조" 항목 참고 — 4개 서비스가 레포 하나를 태그 접두사로
+  # 공유하므로, base 에 실제 레포명을 쓰면 서비스 하나만 골라 태그를 바꿀 수 없다.
+  - name: gamehouse-user
+    newName: nexusops0713/gamehouse
+    newTag: user-REPLACE_AT_DEPLOY
+  - name: gamehouse-post
+    newName: nexusops0713/gamehouse
+    newTag: post-REPLACE_AT_DEPLOY
+  - name: gamehouse-chat
+    newName: nexusops0713/gamehouse
+    newTag: chat-REPLACE_AT_DEPLOY
+  # - name: gamehouse-match
+  #   newName: nexusops0713/gamehouse
+  #   newTag: match-REPLACE_AT_DEPLOY
+  # - name: gamehouse-crew
+  #   newName: nexusops0713/gamehouse
+  #   newTag: crew-REPLACE_AT_DEPLOY
+  - name: gamehouse-riot
+    newName: nexusops0713/gamehouse
+    newTag: riot-REPLACE_AT_DEPLOY
+  # ⚠️ rabbitmq 는 이미지를 푸시하는 CI 가 아직 없다(k8s/README.md 참고).
+  #    dev 에 올리려면 infra CI 에 build-push 잡을 먼저 추가해야 한다.
+  - name: gamehouse-rabbitmq
+    newName: nexusops0713/gamehouse
+    newTag: rabbitmq-REPLACE_AT_DEPLOY
+
+labels:
+  - pairs:
+      app.kubernetes.io/environment: dev
+    includeSelectors: true

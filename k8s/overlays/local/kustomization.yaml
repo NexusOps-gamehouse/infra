@@ -1,5 +1,10 @@
-# dev — kind 클러스터. ingress-nginx + in-cluster postgres + frontend Pod.
-# 사용법: kubectl apply -k k8s/overlays/dev
+# local — kind 클러스터. ingress-nginx + in-cluster postgres + frontend Pod.
+# 사용법: kubectl apply -k k8s/overlays/local  (또는 scripts/k8s-local-up.sh)
+#
+# 환경 3단 중 첫 단계다: local(kind) → dev(EKS) → prod(EKS).
+# 여기서 검증되는 범위는 base/ 뿐이다 — 프로브, NetworkPolicy, 서비스 디스커버리,
+# 컨테이너 env 조립, 롤아웃. ALB·IRSA·External Secrets·RDS 는 여기 없으므로
+# overlays/dev 에서 처음 밟는다.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -31,20 +36,24 @@ patches:
   # - path: patches/replicas-match.yaml
   # - path: patches/replicas-crew.yaml
   - path: patches/replicas-riot.yaml
+  - path: patches/hpa-user.yaml
+  - path: patches/hpa-post.yaml
   - path: patches/hpa-chat.yaml
+  - path: patches/hpa-riot.yaml
   # - path: patches/hpa-match.yaml
 
-# 이미지 태그는 base 기본값(<service>-... 아니라 <service 별 레포>:develop)을 그대로 쓴다.
-# dev 에서 특정 브랜치/커밋 이미지를 테스트하려면 여기 images: 를 추가하는 대신
-# `kustomize edit set image nexusops0713/gamehouse-user=nexusops0713/gamehouse-user:<tag>` 처럼
+# 로컬 이미지는 하나의 `gamehouse` 저장소에 서비스별 태그를 붙인다
+# (`gamehouse:<service>-develop`). base 의 서비스별 논리 이름을 이 좌표로 변환한다.
+# local 에서 특정 브랜치/커밋 이미지를 테스트하려면 여기 images: 를 추가하는 대신
+  # `kustomize edit set image gamehouse-user=gamehouse:user-<tag>` 처럼
 # 서비스별로 개별 지정한다 — 레포가 서비스마다 분리돼 있어 안전하다.
 
 images:
-  # dev 는 로컬에서 빌드해 kind 노드에 직접 적재한 이미지를 쓴다. 레지스트리를 안 탄다.
+  # local 은 로컬에서 빌드해 kind 노드에 직접 적재한 이미지를 쓴다. 레지스트리를 안 탄다.
   #
   #   cd backend
-  #   docker build -t gamehouse-user:develop -f user/Dockerfile .   # 컨텍스트는 backend/ 루트
-  #   kind load docker-image gamehouse-user:develop --name gamehouse-dev
+  #   docker build -t gamehouse:user-develop -f user/Dockerfile .   # 컨텍스트는 backend/ 루트
+  #   kind load docker-image gamehouse:user-develop --name gamehouse-local
   #
   # CI 이미지(nexusops0713/gamehouse:<svc>-develop)를 쓰지 않는 이유가 둘 있다.
   #   1. 비공개 레포라 imagePullSecrets 가 필요하다 — 아직 없다.
@@ -53,19 +62,25 @@ images:
   # 둘 다 풀리면 각 항목에 newName: nexusops0713/gamehouse 를 추가하고
   # newTag 를 <svc>-develop 으로 바꾸면 레지스트리 경로로 전환된다.
   - name: gamehouse-user
-    newTag: develop
+    newName: gamehouse
+    newTag: user-develop
   - name: gamehouse-post
-    newTag: develop
+    newName: gamehouse
+    newTag: post-develop
   - name: gamehouse-chat
-    newTag: develop
+    newName: gamehouse
+    newTag: chat-develop
   - name: gamehouse-riot
-    newTag: develop
+    newName: gamehouse
+    newTag: riot-develop
   - name: gamehouse-frontend
-    newTag: develop
+    newName: gamehouse
+    newTag: frontend-develop
   - name: gamehouse-rabbitmq
-    newTag: develop
+    newName: gamehouse
+    newTag: rabbitmq-develop
 
 labels:
   - pairs:
-      app.kubernetes.io/environment: dev
+      app.kubernetes.io/environment: local
     includeSelectors: true

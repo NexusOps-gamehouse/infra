@@ -1,0 +1,12 @@
+# 이 오버레이가 어떤 환경인지 한 곳에만 적어 둔다.
+# kustomization.yaml 의 `replacements` 가 이 값을 읽어 components/aws 의
+# ExternalSecret 경로 `gamehouse/ENV/...` 를 `gamehouse/dev/...` 로 치환한다.
+# 클러스터에도 실제로 올라간다 — `kubectl -n gamehouse get cm gamehouse-env -o yaml` 로
+# "지금 이 클러스터가 어느 환경인지"를 확인할 수 있다.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gamehouse-env
+  namespace: gamehouse
+data:
+  ENV: "dev"

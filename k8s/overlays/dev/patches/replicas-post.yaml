@@ -1,0 +1,9 @@
+# dev — 2개. 1개로 줄이지 않는 이유: 롤링 업데이트 중 구/신 파드 공존, PDB, ALB
+# 타깃그룹 등록/해제가 파드 1개짜리에서는 검증되지 않는다. prod 는 3개.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: post
+  namespace: gamehouse
+spec:
+  replicas: 2
