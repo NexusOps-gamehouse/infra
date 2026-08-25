@@ -16,5 +16,5 @@ spec:
       port: 8080
       targetPort: http
     - name: mgmt
-      port: 8081
+      port: 8180
       targetPort: mgmt

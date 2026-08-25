@@ -25,7 +25,9 @@ metadata:
     # ⚠️ 오버레이가 환경별 ACM 인증서 ARN 으로 덮어쓴다.
     alb.ingress.kubernetes.io/certificate-arn: REPLACE_IN_OVERLAY
     alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
-    alb.ingress.kubernetes.io/healthcheck-port: "8081"
+    # target-type=ip 에서 Service 의 이름 있는 포트 `mgmt`가 각 Pod의 실제
+    # management targetPort(8181, 8182, 8183 ...)로 해석된다.
+    alb.ingress.kubernetes.io/healthcheck-port: "mgmt"
     # chat 은 WebSocket(STOMP) 이라 유휴 타임아웃을 늘린다 — 기본 60s 면 끊긴다.
     alb.ingress.kubernetes.io/target-group-attributes: stickiness.enabled=false,deregistration_delay.timeout_seconds=30
 spec:
