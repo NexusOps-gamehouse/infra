@@ -1,0 +1,30 @@
+apiVersion: 1
+
+# ---------------------------------------------------------------------------
+# 알림을 어디로 보낼 것인가 (Contact point)
+#
+# webhook URL 은 그 자체가 비밀번호다. URL 만 알면 누구나 그 채널에 글을 쓸 수
+# 있으므로 파일에 직접 적지 않고 환경변수로 주입한다.
+#   .env            → DISCORD_WEBHOOK_URL=...        (git 에 올라가지 않음)
+#   compose         → grafana 컨테이너에 환경변수로 전달
+#   여기            → $__env{...} 로 읽는다
+#
+# ⚠️ 컨테이너가 뜬 뒤 Grafana UI 에서 이 항목을 열면 "Provisioned" 라고 표시되고
+#    수정이 막힌다. 값을 바꾸려면 .env 를 고치고 컨테이너를 다시 만들어야 한다.
+# ---------------------------------------------------------------------------
+contactPoints:
+  - orgId: 1
+    name: discord
+    receivers:
+      - uid: discord-main
+        type: discord
+        settings:
+          url: $__env{DISCORD_WEBHOOK_URL}
+          # {{ }} 는 Grafana 알림 템플릿 문법이다. 규칙에 적어둔 annotations 가 여기 들어온다.
+          title: '{{ if eq .Status "firing" }}🔴{{ else }}✅{{ end }} [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+          message: |
+            {{ range .Alerts }}
+            **{{ .Annotations.summary }}**
+            {{ .Annotations.description }}
+            {{ end }}
+        disableResolveMessage: false

@@ -1,0 +1,7 @@
+[
+  { "id": 1, "email": "lt0001@test.local", "password": "LoadTest!2026" },
+  { "id": 2, "email": "lt0002@test.local", "password": "LoadTest!2026" },
+  { "id": 3, "email": "lt0003@test.local", "password": "LoadTest!2026" },
+  { "id": 4, "email": "lt0004@test.local", "password": "LoadTest!2026" },
+  { "id": 5, "email": "lt0005@test.local", "password": "LoadTest!2026" }
+]

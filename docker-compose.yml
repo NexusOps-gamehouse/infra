@@ -1,27 +1,8 @@
 name: gamehouse
 
 services:
-  db:
-    image: postgres:16-alpine
-    container_name: gamehouse-db
-    environment:
-      POSTGRES_DB: ${DB_NAME:-duo}
-      POSTGRES_USER: ${DB_USERNAME:-duo}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-    ports:
-      - "5432:5432"
-    volumes:
-      - duo-db-data:/var/lib/postgresql/data
-    networks:
-      - backend-net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
   # 채팅 메시지 전달을 위한 외부 STOMP 브로커.
-  # db 와 마찬가지로 backend 만 접근하는 내부 인프라이므로 backend-net 에만 연결한다.
+  # backend 만 접근하는 내부 인프라이므로 backend-net 에만 연결한다.
   rabbitmq:
     build: ../infra/rabbitmq        # STOMP 플러그인을 켠 커스텀 이미지
     container_name: gamehouse-rabbitmq
@@ -29,8 +10,7 @@ services:
       # guest/guest 는 localhost 외부 접속이 막혀 있어 전용 계정을 만든다.
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-appuser}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
-    ports:
-      - "15672:15672"   # 관리 UI (로컬 디버깅용). STOMP(61613)는 컨테이너 간 통신이라 노출 불필요
+    #ports 삭제함 / 어차피 networks : backend-net으로 내부통신은 가능해서 외부에서 접속할 필요 없어보여서 일단 제거 
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     networks:
@@ -56,12 +36,34 @@ services:
     pull_policy: always
     container_name: gamehouse-backend
     depends_on:
-      db:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     environment:
-      DB_URL: jdbc:postgresql://db:5432/${DB_NAME:-duo}
+      # ---- 메모리 상한 ------------------------------------------------------
+      # 측정값(로컬, 유휴 상태): RSS 565MB = 힙 87 + 비힙 158 + 미추적 네이티브 321
+      # 미추적분이 가장 크고, 그중 상당량이 스레드 스택(121개)과 glibc 메모리 풀이다.
+      #
+      # glibc 는 스레드마다 메모리 풀(arena)을 만들어 RSS 를 부풀린다.
+      # 컨테이너 자바에서 잘 알려진 현상으로, 2 로 제한하면 보통 50~100MB 줄어든다.
+      MALLOC_ARENA_MAX: "2"
+      #
+      # Dockerfile 의 ENTRYPOINT 가 exec form(["java","-jar",...])이라 명령줄에
+      # JVM 옵션을 끼워 넣을 수 없다. JAVA_TOOL_OPTIONS 는 JVM 이 기동 시 자동으로
+      # 읽는 환경변수라, 이미지를 다시 만들지 않고 옵션을 주입할 수 있다.
+      # 적용되면 기동 로그에 "Picked up JAVA_TOOL_OPTIONS: ..." 가 찍힌다.
+      #
+      #   -Xmx200m                  : 미지정 시 JVM 은 mem_limit 의 25%(=175m)를
+      #                               힙 최대치로 잡는다. 현재 committed 가 87m 이므로
+      #                               2배 여유를 두되 무제한 성장은 막는다.
+      #   -Xss512k                  : 스레드당 스택 1MB → 512KB. 스레드가 121개라 체감이 크다.
+      #   -XX:MaxDirectMemorySize   : 미지정 시 기본값이 -Xmx 와 같다. WebFlux(netty)가
+      #                               Direct 버퍼를 쓰므로 별도로 천장을 씌운다.
+      #
+      # MaxMetaspaceSize 는 일부러 넣지 않았다. 비힙이 아직 JIT 워밍업으로 상승 중이라
+      # 안정된 값을 확인한 뒤에 정하는 것이 맞다.
+      JAVA_TOOL_OPTIONS: "-Xmx200m -Xss512k -XX:MaxDirectMemorySize=64m"
+      # ----------------------------------------------------------------------
+      DB_URL: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
       DB_USERNAME: ${DB_USERNAME:-duo}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
@@ -80,7 +82,8 @@ services:
       - frontend-net
       - backend-net
     ports:
-      - "8080:8080"   # 로컬 디버깅용
+      - "8080:8080"
+      - "127.0.0.1:8081:8081"
     healthcheck:
       # 런타임 이미지에 curl 없음 → bash 로 포트 TCP 체크
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
@@ -102,16 +105,16 @@ services:
     networks:
       - frontend-net
     ports:
-      - "80:80"
+      - "80:5173"
+
     healthcheck:
-      # localhost 는 컨테이너 내부에서 IPv6(::1)로 풀려 nginx(IPv4)와 안 붙음 → 127.0.0.1
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      test: [ "CMD", "wget", "-qO-", "http://127.0.0.1:5173/" ]
       interval: 10s
       timeout: 3s
       retries: 3
       start_period: 5s
 
-# frontend-net: frontend↔backend / backend-net: backend↔db,rabbitmq (내부 인프라 격리)
+# frontend-net: frontend↔backend / backend-net: backend↔rabbitmq (내부 인프라 격리)
 networks:
   frontend-net:
     driver: bridge
@@ -119,6 +122,5 @@ networks:
     driver: bridge
 
 volumes:
-  duo-db-data:
   backend-uploads:
   rabbitmq-data:

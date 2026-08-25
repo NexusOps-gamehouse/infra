@@ -1,0 +1,330 @@
+name: infra-ci-cd
+
+
+on:
+
+  pull_request:
+    branches:
+      - develop
+
+    paths:
+      - 'docker-compose.yml'
+      - 'docker-compose.local.yml'
+      - 'docker-compose.observability.yml'
+      - 'observability/**'
+      - 'rabbitmq/**'
+      - 'scripts/**'
+      - '.env.example'
+      - '.github/workflows/ci-cd.yml'
+
+
+  push:
+    branches:
+      - develop
+
+    paths:
+      - 'docker-compose.yml'
+      - 'docker-compose.local.yml'
+      - 'docker-compose.observability.yml'
+      - 'observability/**'
+      - 'rabbitmq/**'
+      - 'scripts/**'
+      - '.env.example'
+      - '.github/workflows/ci-cd.yml'
+
+
+concurrency:
+
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+  # PR 검증만 취소 가능.
+  # develop 배포는 중간에 끊지 않는다.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+
+permissions:
+
+  contents: read
+
+  id-token: write
+
+
+jobs:
+
+  # ===============================================================
+  # VERIFY
+  # ===============================================================
+
+  verify:
+
+    name: verify (config validation)
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 10
+
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      # -------------------------------------------------------------
+      # Secret Scan
+      # -------------------------------------------------------------
+
+      - name: Secret scan (gitleaks)
+        run: |
+
+          docker run \
+            --rm \
+            -v "${PWD}:/repo" \
+            zricethezav/gitleaks:v8.18.4 \
+            detect \
+            --source=/repo \
+            --no-git \
+            --redact \
+            --verbose
+
+
+      # -------------------------------------------------------------
+      # Compose validation용 dummy env
+      #
+      # 실제 secret은 사용하지 않는다.
+      # -------------------------------------------------------------
+
+      - name: Prepare .env from example
+        run: |
+
+          cp .env.example .env
+
+
+      # -------------------------------------------------------------
+      # Production Compose
+      #
+      # AWS에서 실제로 사용하는 구성.
+      # PostgreSQL container가 포함되면 안 된다.
+      # -------------------------------------------------------------
+
+      - name: Validate production compose
+        run: |
+
+          docker compose \
+            -f docker-compose.yml \
+            config >/dev/null
+
+          echo "Production docker-compose.yml OK"
+
+
+      # -------------------------------------------------------------
+      # Local Compose
+      #
+      # base + local override를 합친 최종 개발 환경을 검증한다.
+      # -------------------------------------------------------------
+
+      - name: Validate local compose
+        run: |
+
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.local.yml \
+            config >/dev/null
+
+          echo "Local compose configuration OK"
+
+
+      # -------------------------------------------------------------
+      # Observability Compose
+      # -------------------------------------------------------------
+
+      - name: Validate observability compose
+        run: |
+
+          docker compose \
+            -f docker-compose.observability.yml \
+            config >/dev/null
+
+          echo "Observability compose configuration OK"
+
+
+      # -------------------------------------------------------------
+      # Prometheus
+      # -------------------------------------------------------------
+
+      - name: Validate prometheus config (promtool)
+        run: |
+
+          docker run \
+            --rm \
+            -v "${PWD}/observability:/cfg:ro" \
+            --entrypoint promtool \
+            prom/prometheus:v2.55.1 \
+            check config \
+            /cfg/prometheus.yml
+
+
+      # -------------------------------------------------------------
+      # Grafana dashboards
+      # -------------------------------------------------------------
+
+      - name: Validate Grafana dashboard JSON
+        run: |
+
+          for f in observability/grafana/provisioning/dashboards/*.json; do
+
+            python3 -c \
+              "import json,sys; json.load(open(sys.argv[1]))" \
+              "$f"
+
+            echo "${f} OK"
+
+          done
+
+
+  # ===============================================================
+  # DEPLOY
+  #
+  # Local compose는 절대 사용하지 않는다.
+  # deploy.sh 자체가 docker-compose.yml만 명시적으로 사용한다.
+  # ===============================================================
+
+  # ---------------------------------------------------------------
+  # ⛔ 현재 비활성 — if: false
+  #
+  # [왜 껐나]
+  # 백엔드가 MSA 로 나뉘어 서비스 4개(user/post/chat/riot)가 됐다.
+  # 그런데 docker-compose.yml 은 아직 backend 컨테이너 1개 전제이고,
+  # RDS 에도 서비스별 스키마·계정이 없다. 이 상태로 deploy.sh 가 돌면
+  #   - 옛 backend 이미지 하나만 뜨거나
+  #   - 새 이미지가 떠도 default_schema(post_svc 등)를 찾지 못한다
+  #
+  # [되살리는 조건] — 4단계 배포 준비
+  #   1. docker-compose.yml 을 서비스 4개로 확장 (user/post/chat/riot)
+  #   2. nginx 또는 Ingress 경로 라우팅
+  #        /api/auth · /api/users · /api/friends · /api/notifications · /uploads → user
+  #        /api/posts · /api/applications · /api/my                             → post
+  #        /api/chat · /ws                                                      → chat
+  #        riot 은 내부 전용 — 외부 노출 없음
+  #   3. RDS 에 backend/db/migration/V1·V2 적용
+  #   4. 배포 환경변수 추가 — USER/POST/CHAT_DB_USERNAME·PASSWORD
+  #   위 넷이 끝나면 아래 if 를 원래대로 되돌린다.
+  #     if: github.event_name == 'push'
+  # ---------------------------------------------------------------
+
+  deploy:
+
+    name: deploy (비활성 — 4단계 준비 후 활성화)
+
+    needs:
+      - verify
+
+    if: false
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 15
+
+
+    permissions:
+
+      id-token: write
+
+      contents: read
+
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+
+        with:
+
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+          aws-region: ${{ secrets.AWS_REGION }}
+
+
+      - name: Encode ENV_FILE
+        run: |
+
+          printf "%s" "${{ secrets.ENV_FILE }}" \
+            | base64 -w0 \
+            > env.b64
+
+
+      - name: Deploy via SSM
+        run: |
+
+          ENV_B64=$(cat env.b64)
+
+          COMMAND_ID=$(
+
+            aws ssm send-command \
+              --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+              --document-name "AWS-RunShellScript" \
+              --comment "Deploy GameHouse (infra)" \
+              --parameters "commands=[
+                \"echo '$ENV_B64' | base64 -d > /home/ssm-user/infra/.env\",
+                \"sudo chown ssm-user:ssm-user /home/ssm-user/infra/.env\",
+                \"sudo chmod 600 /home/ssm-user/infra/.env\",
+                \"sudo -u ssm-user -H bash /home/ssm-user/infra/scripts/deploy.sh\"
+              ]" \
+              --query "Command.CommandId" \
+              --output text
+
+          )
+
+          echo "Command ID: $COMMAND_ID"
+
+
+          for i in {1..60}; do
+
+            STATUS=$(
+
+              aws ssm get-command-invocation \
+                --command-id "$COMMAND_ID" \
+                --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+                --query "Status" \
+                --output text
+
+            )
+
+
+            echo "Current Status: $STATUS"
+
+
+            if [ "$STATUS" = "Success" ]; then
+
+              echo "Deployment succeeded!"
+
+              break
+
+            fi
+
+
+            if [ "$STATUS" = "Failed" ] || \
+               [ "$STATUS" = "Cancelled" ] || \
+               [ "$STATUS" = "TimedOut" ]; then
+
+              aws ssm get-command-invocation \
+                --command-id "$COMMAND_ID" \
+                --instance-id "${{ secrets.EC2_INSTANCE_ID }}"
+
+              exit 1
+
+            fi
+
+
+            sleep 5
+
+          done
+
+
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}"

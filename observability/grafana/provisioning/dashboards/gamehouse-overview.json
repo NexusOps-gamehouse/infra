@@ -1,0 +1,1298 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "수집 상태 (up)",
+      "description": "Prometheus 가 각 대상을 긁는 데 성공했는지. UP=1, DOWN=0.\n\n여기가 빨간색이면 그 job 이 담당하는 아래 패널은 전부 빈다. 그래프가 안 보일 때 가장 먼저 볼 곳.\n\njob 별 담당:\n  prometheus — 수집기 자신\n  cadvisor   — 컨테이너 CPU/메모리\n  node       — 호스트 디스크/메모리\n  backend    — 응답시간, 5xx, 채팅, Riot\n  rabbitmq   — 채팅 큐",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "UP",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 26
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "up",
+          "legendFormat": "{{job}}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "전체 컨테이너 CPU %",
+      "description": "장애 대응의 출발점. 모든 컨테이너를 한 화면에 겹쳐 '누가 언제부터 바빠졌나'를 먼저 본다.\n컨테이너를 따로따로 보면 비교가 안 되어 범인을 못 찾는다.\n\n100% = CPU 코어 1개를 꽉 쓰는 중. 상한이 아니다 —\n코어가 여러 개면 100% 를 넘을 수 있다(t3.small 은 2코어이므로 최대 200%).\n\n_total 로 끝나는 counter 는 누적값이라 rate() 로 감싼다.\n결과 단위가 '코어 수'이므로 *100 이 %.\n\n호스트 전체 CPU 는 아래 '호스트 메모리 여유 / CPU 포화도' 패널에서 본다.\n\nrate() 창을 [2m] 로 두는 이유\n  rate 는 창 안에 샘플이 최소 2개 있어야 계산된다.\n  scrape_interval 이 30초이므로 [1m] 창에는 샘플이 딱 2개뿐이라 여유가 없다.\n  수집이 한 번만 밀려도 창에 1개만 남아 그 시점이 빈칸이 되고,\n  선이 툭툭 끊기며 양옆이 비면 점 하나만 동그라미로 찍힌다.\n  경험칙: rate 창 >= scrape_interval x 4. 30초 수집이면 [2m] 이상.\n\n선이 끊길 때 확인 순서\n  up{job=\"cadvisor\"}                      끊긴 구간에 0 이면 수집 실패\n  scrape_duration_seconds{job=\"cadvisor\"} 10초에 근접하면 타임아웃\n  둘 다 멀쩡한데 그래프만 끊기면 rate 창 문제다.\n\n같은 이름이 두 줄로 보일 때\n  컨테이너를 재생성하면 컨테이너 ID 가 바뀐다. cAdvisor 는 ID 단위로\n  시계열을 만들므로 이름은 같지만 다른 시계열 2개가 된다.\n  옛 선은 시간이 지나면 조회 범위에서 빠진다. 정상이다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "id": 2,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(container_cpu_usage_seconds_total{name=~\"gamehouse-.*\"}[2m]) * 100",
+          "legendFormat": "{{name}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "전체 컨테이너 메모리",
+      "description": "단위는 MB / GB (1000 단위). Grafana 의 MiB(1024 단위)와는 약 5% 차이가 나지만\n감시 목적에는 영향이 없어 익숙한 표기를 쓴다.\n\n대략의 정상 범위 (참고용)\n  backend (Spring Boot) — 300~600 MB\n  db (PostgreSQL)       — 30~100 MB\n  rabbitmq              — 100~200 MB\n  frontend (serve)      — 30~80 MB\n\n중요한 것은 절대값보다 '모양'이다. 톱니처럼 오르내리면 GC 가 도는 정상 패턴,\n한 방향으로 계속 우상향하면 누수를 의심한다.\n\nworking set = 회수 불가능한 실사용분. usage 는 캐시를 포함해 부풀려 보이므로\nOOM 판단에는 working set 을 쓴다.\n\n호스트 전체 메모리는 아래 '호스트 메모리 여유 / CPU 포화도' 패널에서 본다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "id": 3,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "container_memory_working_set_bytes{name=~\"gamehouse-.*\"}",
+          "legendFormat": "{{name}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "요청량 (분당, 엔드포인트별)",
+      "description": "응답시간과 에러를 해석하려면 '얼마나 오는가'를 같이 봐야 한다.\n\n  p95 가 뚝 떨어졌다 → 빨라진 건가? 요청이 0 이면 아무도 안 쓴 것이다.\n  5xx 가 0 건이다   → 정상인가? 요청도 0 이면 판단할 수 없다.\n  CPU 가 급증했다   → 요청이 3배면 트래픽 증가가 원인이다.\n\n'전체' 선은 or vector(0) 으로 항상 그려진다. 이 선이 0 이면 수집은 정상인데\n트래픽이 없는 것이고, 선 자체가 없으면 backend job 이 DOWN 인 것이다.\n\n제외한 것 (API 3종 세트 공통)\n  /actuator/*  Prometheus 가 15초마다 긁어가는 수집 요청. 앱 트래픽이 아니다\n  /ws/*        SockJS 연결. 25초씩 열려 있다 끊기며 기록되어 그래프를 왜곡한다.\n               채팅은 전용 패널(큐 적체 / 동시 접속자)에서 본다\n\n알아두면 좋은 것: /api/notifications 는 NavBar 가 10초마다 폴링한다.\n사용자가 브라우저를 켜두기만 해도 1인당 분당 6회가 들어오므로,\n이 선이 유독 평평하고 높은 것은 정상이다.\n\n/uploads/** 처럼 별표가 붙는 것은 URI 템플릿이다. 실제 파일명이 그대로 들어가면\n업로드 파일 하나당 시계열이 생겨 카디널리티가 폭발하므로 Spring 이 패턴으로 기록한다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 14
+      },
+      "id": 12,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "전체"
+            },
+            "properties": [
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    8,
+                    6
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (uri) (rate(http_server_requests_seconds_count{job=\"backend\",uri!~\"/actuator.*|/ws/.*\"}[5m])) * 60",
+          "legendFormat": "{{uri}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"backend\",uri!~\"/actuator.*|/ws/.*\"}[5m])) * 60 or vector(0)",
+          "legendFormat": "전체"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "앱 응답시간 p95 (엔드포인트별)",
+      "description": "요청 100건 중 95번째로 느린 요청의 소요 시간. 평균은 소수의 느린 요청을 가려버리므로 p95 를 본다.\n\n컨테이너 CPU 는 한가한데 이 값만 치솟으면 원인이 컨테이너 밖(DB, 외부 API, 네트워크)에 있다는 뜻이다.\n\n트래픽이 없으면 데이터도 없다. 요청을 몇 번 보내면 나타난다:\n  for i in $(seq 1 50); do curl -s http://localhost:8080/api/posts > /dev/null; done",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 14
+      },
+      "id": 6,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{job=\"backend\",uri!~\"/actuator.*|/ws/.*\"}[5m])))",
+          "legendFormat": "{{uri}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "채팅 — 큐 적체 / 동시 접속자",
+      "description": "대기 중 메시지(rabbitmq_queue_messages_ready) = 브로커에 쌓여 아직 소비되지 않은 메시지 수.\n\n0 근처에서 머물면 정상이다. 계속 늘어나면 소비 속도가 생산 속도를 못 따라가는 것 =\n채팅이 밀리고 있다는 뜻. 이때 backend CPU 와 응답시간을 함께 확인한다.\n\n앱의 chat_active_sessions 는 '지금 몇 명이 붙어 있나'를 보여준다.\n접속자가 늘었는데 큐도 같이 늘면 용량 한계 신호.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "id": 8,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rabbitmq_queue_messages_ready)",
+          "legendFormat": "대기 중 메시지 (적체)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rabbitmq_queue_messages_unacked)",
+          "legendFormat": "처리 중 (미확인)"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "chat_active_sessions",
+          "legendFormat": "채팅 동시 접속자"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Riot 호출 횟수 (2분 / 100회 한도)",
+      "description": "개발용 API 키의 한도는 2분당 100회다. 빨간 점선이 그 한도다.\n\n★ 한도는 '호스트별로 따로' 센다 — 이 패널의 핵심\n  우리는 두 호스트를 쓴다.\n    asia.api.riotgames.com   Account API            연동 1회당 1호출\n    kr.api.riotgames.com     Summoner/League/Mastery 연동 1회당 3호출\n  각자 독립된 100회 예산을 갖는다. 그래서 절대 합쳐서 보면 안 되고,\n  stacking 도 꺼두었다. 합계는 어느 예산도 대표하지 않는 숫자다.\n\n  실제 측정값이 이것을 증명한다. 연타로 한도를 때렸을 때\n    asia  성공 35회, 429 0회      ← 예산 여유\n    kr    성공 100회, 429 2회     ← 정확히 100 에서 차단\n  총 137회였지만 걸린 것은 kr 하나뿐이다.\n\n  따라서 병목은 kr 이고, 2분에 33명만 연동해도(33×3=99) 한도가 찬다.\n  (예전 설명의 '25명'은 두 호스트를 합쳐 4회로 계산한 오류였다.)\n\n★ increase() 를 쓰지 않는 이유\n  increase(x[2m]) 는 창 안의 샘플만으로 계산한 뒤 창 끝까지 '외삽'한다.\n  수집 주기가 30초면 2분 창에 샘플이 4개뿐이라 실제 관측 구간은 90초다.\n  Prometheus 는 90초분을 120초분으로 늘려 잡으므로 120/90 = 약 1.33배,\n  즉 33% 크게 나온다. 실제로 kr 100회가 135 로 보였다.\n  (알람 규칙의 [5m] 은 300/270 = 1.11배. 같은 현상이고 창이 짧을수록 심하다.)\n\n  그래서 max_over_time - min_over_time 을 쓴다. 창 안에서 관측된 최댓값과\n  최솟값의 차이라 외삽이 없고, 실제로 센 값이 그대로 나온다.\n  단점: 창 안에서 시리즈가 처음 생기면 그 첫 건은 0 으로 잡히고,\n  backend 재시작으로 카운터가 리셋되면 값이 튄다. 둘 다 '추세를 본다'는\n  이 패널의 목적에는 문제가 되지 않는 수준이다.\n\n읽는 법\n  각 호스트 선   최근 2분간 그 호스트로 나간 호출 수. 각자 100 이 한도다\n  429            한도에 걸린 건수. 0 이 아니면 이미 넘긴 것\n\n  ~70    여유\n  70~100 주의. 시연이나 테스트를 몰아서 하면 곧 넘는다\n  100    차단 시작\n\n한계\n  - 이 값은 '우리가 센 횟수'이지 라이엇이 센 값이 아니다. 정확히 하려면\n    응답 헤더 X-App-Rate-Limit-Count 를 읽어 Gauge 로 노출해야 한다(추후 과제).\n  - 또 하나의 한도인 '1초 20회'는 이 방식으로 볼 수 없다. 수집 주기가 30초라\n    1초 안의 순간 버스트가 평균으로 뭉개지기 때문이다.\n  - 정확한 건수가 꼭 필요하면 /actuator/prometheus 를 직접 본다. 그 값은\n    추정이 섞이지 않은 누적 카운터다.\n\n429 시리즈만 increase() 를 쓴다. 건수가 한 자릿수라 max-min 으로는 첫 건이\n0 으로 뭉개지기 때문이다. 여기서는 '몇 건인지'보다 '0 인지 아닌지'가 중요하다.\n\n응답 지연이 궁금하면 Explore 에서:\n  histogram_quantile(0.95, sum by (le) (rate(http_client_requests_seconds_bucket{job=\"backend\"}[5m])))\n\n빈 화면이면 라이엇 호출이 없었던 것이다. 라벨 이름이 다를 수도 있으니\nExplore 에서 http_client_requests_seconds_count 를 조회해 client_name 값을 확인할 것.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "id": 9,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 40,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "429 (한도 초과)"
+            },
+            "properties": [
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "한도 (100회)"
+            },
+            "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (client_name) (max_over_time(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\"}[2m]) - min_over_time(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\"}[2m]))",
+          "legendFormat": "{{client_name}}"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\",status=\"429\"}[2m])) or vector(0)",
+          "legendFormat": "429 (한도 초과)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "vector(100)",
+          "legendFormat": "한도 (100회)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "DB 커넥션 풀 (backend → RDS)",
+      "description": "DB 연결을 새로 만드는 일은 비싸다. 요청마다 새로 맺으면 느리므로 미리 몇 개 만들어\n두고 돌려쓴다. 이것이 커넥션 풀이다. Spring Boot 는 HikariCP 를 쓰고 기본 크기는 10.\n\n식당 좌석으로 생각하면 쉽다. 좌석이 10개인데 손님이 15명 오면 5명은 문 앞에서 기다린다.\n\n  최대 (풀 크기)  좌석 총 개수\n  사용 중         지금 쿼리를 실행하고 있는 연결\n  유휴            비어 있는 좌석\n  대기 중         ⭐ 좌석을 못 얻어 멈춰 선 스레드 수\n\n'대기 중'이 이 패널의 핵심이다. 0 이어야 정상이고, 1 이상이면 요청이 DB 연결을\n기다리느라 멈춰 있다는 뜻이다.\n\n이때 증상이 아주 특이하다\n  backend CPU    한가함\n  backend 메모리  정상\n  응답시간 p95    치솟음   ← 아무 데도 안 바쁜데 느리다\n다들 그냥 기다리고 있기 때문이다. 이 패널이 없으면 '원인 불명'으로 끝난다.\n\n왜 이런 일이 생기나 — 느린 쿼리 하나가 좌석을 오래 붙잡으면 도미노가 된다.\n  느린 쿼리(3초) 실행 → 좌석 10개가 다 참 → 다음 요청들이 줄을 섬(대기 상승)\n  → 그 요청들의 응답시간도 3초씩 늘어남 → 사용자는 '사이트 전체가 느리다'고 느낌\n범인은 쿼리 하나인데 증상은 전체 장애다.\n\n⚠️ RDS 전환으로 이 패널의 중요도가 올라갔다. DB 가 같은 호스트 안이 아니라\n   네트워크 건너편에 있으므로, 연결을 새로 맺는 비용과 쿼리 왕복 시간이 전보다 크다.\n   즉 좌석이 붙잡혀 있는 시간이 길어져 '대기 중'이 더 쉽게 생긴다.\n\n대기가 계속 잡히면\n  1) 느린 쿼리를 먼저 찾는다 (응답시간 p95 패널에서 어느 엔드포인트인지 좁힌다)\n  2) 그래도 부족하면 spring.datasource.hikari.maximum-pool-size 를 늘린다\n     단, RDS 의 max_connections 를 넘기면 안 된다. RDS 는 인스턴스 메모리에 따라\n     이 값이 자동으로 정해진다 (db.t3.micro 는 90 안팎)\n\n※ 이 패널은 '앱에서 본' 시야다. postgres_exporter 를 붙이면 'DB 에서 본' 연결 수와\n  비교할 수 있고, 그때 비로소 풀이 작은 건지 DB 가 한계인지 갈린다.\n\n  대기 높음 + DB 연결 수 낮음  → 풀이 작다 (풀 확대)\n  대기 높음 + DB 연결 수 최대  → DB 가 한계 (쿼리 튜닝 / 인스턴스 확대)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 30
+      },
+      "id": 16,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "최대 (풀 크기)"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "대기 중"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 25
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "hikaricp_connections_active{job=\"backend\"}",
+          "legendFormat": "사용 중"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "hikaricp_connections_idle{job=\"backend\"}",
+          "legendFormat": "유휴"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "hikaricp_connections_pending{job=\"backend\"}",
+          "legendFormat": "대기 중"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "hikaricp_connections_max{job=\"backend\"}",
+          "legendFormat": "최대 (풀 크기)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "id": 20,
+      "title": "DB 연결 수 (RDS 에서 본 시야)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 30
+      },
+      "description": "RDS 에 실제로 붙어 있는 연결 수다. 옆의 'DB 커넥션 풀' 패널이 앱에서 본 시야라면\n이쪽은 DB 에서 본 시야이고, 둘을 대조해야 원인이 갈린다.\n\n  Hikari 대기 중 높음 + 여기 연결 수 낮음  → 풀이 작다 (maximum-pool-size 확대)\n  Hikari 대기 중 높음 + 여기 연결 수 최대  → DB 가 한계 (쿼리 튜닝 / 인스턴스 확대)\n\n이 구분이 없으면 엉뚱한 곳을 고친다. 풀만 늘리면 될 일에 RDS 인스턴스를 키우거나,\n반대로 DB 가 한계인데 풀을 늘려 상황을 악화시킨다.\n\n우리 앱만 세는 것이 아니다. 누군가 DBeaver 로 붙어 있거나 배치가 돌고 있으면 그것도 잡힌다.\n'앱은 10개 쓰는데 왜 90개가 붙어 있지?' 를 여기서 발견한다.\n\nmax_connections 는 RDS 파라미터 그룹 값이고 인스턴스 크기에 따라 자동으로 정해진다.\n작은 인스턴스일수록 적으므로, 풀 크기를 늘릴 때는 반드시 이 선을 먼저 확인한다.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "최대 (max_connections)"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "pg_stat_database_numbackends{datname=\"duo\"}",
+          "legendFormat": "duo 연결 수"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "pg_settings_max_connections",
+          "legendFormat": "최대 (max_connections)"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "호스트 디스크 사용률",
+      "description": "EC2 루트 EBS 볼륨(mountpoint=\"/\")의 사용률이다. (75% 주황 / 85% 빨강)\n\n예전에는 '남은 용량(GB)'을 오른쪽 축에 함께 그렸는데 지웠다.\n20GB 볼륨에서 49% 사용 = 10GB 남음 이므로 둘은 같은 정보의 다른 표현이고,\n축을 두 개 쓰면 Grafana 가 범례에 '(right y-axis)' 를 붙여 지저분해진다.\n남은 GB 가 필요하면 Explore 에서:\n  node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay|ramfs|devtmpfs\"}\n\n⚠️ macOS 로컬에서는 No data 가 정상이다.\nDocker Desktop 은 컨테이너를 VM 안에서 돌려 호스트 루트가 \"/\" 가 아닌\n\"/host/root\" 로 잡히고, 그 값은 맥의 실제 디스크도 아니다.\nEC2 에서는 \"/\" 하나로 깔끔하게 나온다.\n\n왜 이 패널이 필요한가:\n호스트 디스크가 100% 가 되어도 컨테이너 CPU/메모리 지표는 전부 정상으로 보인다.\ncAdvisor 의 사각지대라 이 층이 없으면 원인을 영원히 못 찾는다.\n디스크가 차면 PostgreSQL 쓰기 실패, 컨테이너 기동 불가, Prometheus 수집 중단이\n한꺼번에 발생한다.\n\n읽는 법: 절대값보다 '기울기'를 본다. 일주일에 3% 씩 오르면 두 달 여유,\n어제부터 하루 5% 씩 오르면 뭔가 새로 쌓이기 시작한 것이다.\n미리 알면 EBS 를 무중단으로 늘릴 수 있다.\n\n용량 산정과 대응 절차 → observability/README.md",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 38
+      },
+      "id": 10,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay|ramfs|devtmpfs\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay|ramfs|devtmpfs\"})",
+          "legendFormat": "사용률"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "호스트 메모리 여유",
+      "description": "호스트(EC2) 전체의 사용 가능 메모리다. 컨테이너 메모리가 여유로워도\n호스트가 말라 있으면 곧 OOM 으로 컨테이너가 강제 종료된다.\n\nt3.small 은 2GB 다. 이 선이 300MB 아래로 내려가기 시작하면 위험 구간이다.\n\n옆의 'CPU 포화도' 와 원래 한 패널이었는데, 단위가 달라 축을 둘로 나눠야 했고\n그러면 Grafana 가 범례에 '(right y-axis)' 를 붙인다. 서로 다른 이야기를 하는\n지표라 패널을 나누는 편이 읽기에도 낫다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 38
+      },
+      "id": 11,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_memory_MemAvailable_bytes",
+          "legendFormat": "사용 가능 메모리"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "호스트 CPU 포화도",
+      "description": "load average 를 코어 수로 나눠 % 로 바꾼 값이다. t3.small 은 vCPU 2개.\n\n컨테이너 CPU % 와 무엇이 다른가 — 답하는 질문이 다르다.\n  컨테이너 CPU %  \"누가 얼마나 쓰고 있나\"       사용률(utilization)\n  CPU 포화도      \"쓰려는데 못 쓰고 기다리나\"    포화(saturation)\n\n사용률은 아무리 바빠도 100% 가 천장이라 100% 끼리는 구분이 안 된다.\n포화도는 그 위로 계속 올라가므로 '얼마나 심각한가'를 알려준다.\n\n  ~70%   여유\n  100%   코어를 꽉 채운 상태\n  100%+  처리 못한 작업이 줄 서 있음 = 응답이 느려지기 시작\n\n컨테이너 CPU 패널이 못 보는 것을 본다\n  1) 컨테이너 밖 — Docker 데몬, SSM Agent, cron, 이미지 pull 등\n  2) 디스크 대기 — 리눅스 load 는 CPU 뿐 아니라 I/O 를 기다리는 프로세스(D 상태)도 센다\n     그래서 'CPU 는 5% 인데 포화도 300%' 같은 상황이 나온다. EBS 가 느려졌거나\n     버스트 크레딧이 소진된 경우다. 컨테이너 CPU 만 보면 '문제 없음' 으로 읽힌다\n\n──────────────────────────────────────────────────────────────────────\n[2026-08 수정] 이 선이 그려지지 않던 문제\n\n  이전 쿼리:  100 * node_load1 / count(node_cpu_seconds_total{mode=\"idle\"})\n\n  PromQL 은 벡터끼리 나눌 때 양쪽 라벨이 일치해야 짝을 짓는다.\n    node_load1        → {instance=\"...\", job=\"node\"}\n    count(...) 결과   → 라벨 없음 (by 없이 집계하면 라벨이 전부 사라진다)\n  짝이 안 맞아 결과가 빈 벡터가 되고, 에러도 없이 선만 사라진다.\n\n  scalar() 로 감싸면 벡터가 숫자 하나가 되어 라벨 매칭을 건너뛴다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 38
+      },
+      "id": 24,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "100 * node_load1 / scalar(count(node_cpu_seconds_total{mode=\"idle\"}))",
+          "legendFormat": "CPU 포화도"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "네트워크 사용량 (컨테이너별, 대역폭 대비 %)",
+      "description": "각 컨테이너가 초당 주고받은 데이터(수신 + 송신)를, t3.small 이 지속 유지할 수 있는\n대역폭(약 16 MB/s)에 대한 비율로 환산했다.\n\n왜 % 인가 — '250 KB/s' 는 그 자체로 판단이 안 되는 숫자다. 한도가 16 MB/s 인지\n1 GB/s 인지 모르면 여유인지 위험인지 알 수 없다. 비율로 보면 바로 읽힌다.\n(디스크 패널을 사용률 % 로 둔 것과 같은 이유)\n\n위험 기준 (컨테이너 하나 기준)\n  ~25%    여유. 평소 우리 규모에서는 1% 도 안 나온다\n  25~50%  한 컨테이너가 서버 대역폭의 1/4 이상을 혼자 쓰는 중. 원인을 확인한다\n  50%+    위험\n\n  ※ 모든 선의 합이 100% 에 가까우면 대역폭이 곧 병목이 된다.\n\n튀는 컨테이너로 원인을 좁힌다\n  backend   /uploads/** 이미지 서빙이거나, RDS 와 주고받는 쿼리 결과다.\n            DB 가 RDS 로 빠지면서 DB 트래픽도 backend 선에 합쳐졌다.\n            '요청 수는 그대로인데 서버가 느리다'의 원인이 여기서 잡힌다\n  rabbitmq  채팅량 증가. 옆 채팅 패널과 함께 본다\n  frontend  정적 파일 서빙\n\n⚠️ t3 계열은 네트워크도 크레딧 방식이다. CPU 처럼 순간적으로는 훨씬 빠르지만,\n   지속 사용량이 baseline 을 넘으면 크레딧이 소진되고 속도가 baseline 으로 고정된다.\n   이때 증상이 'CPU 도 메모리도 멀쩡한데 갑자기 전체가 느려짐' 이다.\n   다른 패널이 전부 정상인데 서비스가 느리면 이 선들의 합을 확인할 것.\n   (호스트 NIC 기준 패널은 제거했다. 컨테이너 합계로 대신 판단한다)\n\n수신/송신을 더해 하나로 그린다. 방향까지 나누면 선이 배로 늘어 오히려 안 보인다.\n방향이 필요하면 Explore 에서:\n  sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n\n실제 바이트 값이 필요하면:\n  sum by (name) (rate(container_network_receive_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n  + sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))\n\n16 MB/s 는 t3.small 의 대략적인 baseline 이다. 인스턴스 타입을 바꾸면 이 분모도\n함께 바꿔야 한다(쿼리의 16000000).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "id": 14,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 2,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 25
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "100 * (sum by (name) (rate(container_network_receive_bytes_total{name=~\"gamehouse-.*\"}[5m])) + sum by (name) (rate(container_network_transmit_bytes_total{name=~\"gamehouse-.*\"}[5m]))) / 16000000",
+          "legendFormat": "{{name}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "에러 발생 건수 (최근 5분)",
+      "id": 7,
+      "description": "최근 5분 동안 발생한 서버 오류(5xx) 건수. 비율이 아니라 실제 건수라 바로 읽힌다.\n\n0 이 정상이다. 1 건이라도 올라오면 아래 '에러 엔드포인트' 패널에서 위치를 보고\n그 시각의 backend 로그를 확인한다:\n  docker compose logs backend --since 10m | grep -i error\n\n4xx(잘못된 요청)는 사용자 입력 문제라 여기 포함하지 않는다.\n서버가 처리하다 실패한 5xx 만 센다.\n\n타일 두 개인 이유 — 결론과 원인이다\n  전체              몇 건인가\n  Riot API 키 만료   그 원인이 키 문제인가\n'어디서'는 아래 패널이 답한다. 큰 숫자를 셋으로 늘리면 무엇이 결론인지 흐려진다.\n\n전체는 or vector(0) 덕분에 에러가 없어도 항상 0 이 보인다.\n값이 사라지면 에러가 없는 것이 아니라 backend 수집이 끊긴 것이다.\n\nRiot API 키 만료 타일\n  개발용 키는 24 시간마다 만료된다. 만료되면 Riot 이 401 을 돌려주고\n  (403 이 아니다 — 실제로 확인했다), 그 예외가 잡히지 않아 sync 가 500 이 된다.\n  즉 전체 숫자는 이미 올라가지만 원인은 보이지 않는다. 그래서 원인 쪽에서 한 번 더 센다.\n  401 은 키 헤더 누락, 403 은 무효. 둘 다 대응이 '키를 확인한다'라 함께 센다.\n  429(레이트 리밋)는 제외 — 키는 정상인데 많이 쓴 것이라 대응이 다르다.\n  대응: 새 키 발급 → .env 의 RIOT_API_KEY 교체 → docker compose up -d backend\n        (restart 는 환경변수를 다시 읽지 않는다)\n\nincrease() 는 추정값이라 1.8 처럼 소수가 나온다. 그래서 임계값을 1 이 아니라 0.1 에 두었다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 14,
+          "valueSize": 44
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "legendFormat": "전체",
+          "expr": "sum(increase(http_server_requests_seconds_count{job=\"backend\",status=~\"5..\",uri!~\"/actuator.*|/ws/.*\"}[5m])) or vector(0)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "legendFormat": "Riot API 키 만료",
+          "expr": "sum(increase(http_client_requests_seconds_count{job=\"backend\",client_name=~\".*riotgames.*\",status=~\"401|403\"}[5m])) or vector(0)"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "에러 엔드포인트 (최근 5분)",
+      "id": 20,
+      "description": "위 패널이 '몇 건'과 '왜'에 답한다면 이 패널은 '어디서'에 답한다.\n옆 패널들의 하단 범례와 같은 역할이라 같은 모양(이름 + 수치 표)으로 맞췄다.\n\nstat 패널에는 범례가 없어서 패널을 나눴다. 큰 숫자 옆에 엔드포인트를 같은\n크기로 붙이면 무엇이 결론인지 흐려지기 때문이다.\n\n에러가 없으면 표가 비어 있다. 줄이 생기는 순간이 곧 봐야 할 곳이다.\n\n여기서 엔드포인트를 확인한 뒤 로그로 넘어간다:\n  docker compose logs backend --since 10m | grep -i error\n메트릭은 감지까지, 원인은 로그에 있다.\n\ninstant 쿼리에 format: table 을 쓰면 Prometheus 가 Time / uri / Value 열로 준다.\norganize 변환으로 Time 을 숨기고 열 이름만 한글로 바꿨다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "format": "table",
+          "expr": "sum by (uri) (increase(http_server_requests_seconds_count{job=\"backend\",status=~\"5..\",uri!~\"/actuator.*|/ws/.*\"}[5m]))"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "uri": "엔드포인트",
+              "Value": "건수"
+            },
+            "indexByName": {}
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "건수",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "건수"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              },
+              {
+                "id": "custom.align",
+                "value": "right"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ]
+        }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "gamehouse",
+    "observability"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "00 overview",
+  "uid": "gamehouse-overview",
+  "version": 21,
+  "weekStart": ""
+}
