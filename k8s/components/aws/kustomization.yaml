@@ -49,7 +49,6 @@ patches:
   # - path: patches/delete-secret-crew-db.yaml
 
   # 비공개 도커허브 레포 pull 자격증명을 각 ServiceAccount 에 붙인다.
-  # redis 는 공개 이미지(redis:7-alpine)라 대상이 아니다.
   - path: patches/imagepullsecret-user.yaml
   - path: patches/imagepullsecret-post.yaml
   - path: patches/imagepullsecret-chat.yaml

@@ -1,9 +1,10 @@
-# dev — 2개. 1개로 줄이지 않는 이유: 롤링 업데이트 중 구/신 파드 공존, PDB, ALB
-# 타깃그룹 등록/해제가 파드 1개짜리에서는 검증되지 않는다. prod 는 3개.
+# dev — 1개. 다른 서비스와 달리 2개로 두지 않는다: riot 의 RateLimiter 가
+# 프로세스 메모리 상태라 파드 수만큼 라이엇 API 한도를 초과한다(base/riot/deployment.yaml 참고).
+# 롤링 업데이트·PDB·ALB 타깃그룹 등록/해제 검증은 user/post/chat 이 이미 다중 파드로 밟는다.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: riot
   namespace: gamehouse
 spec:
-  replicas: 2
+  replicas: 1

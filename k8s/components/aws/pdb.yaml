@@ -61,7 +61,10 @@ metadata:
   name: riot
   namespace: gamehouse
 spec:
-  minAvailable: 1
+  # riot 은 replicas 1 고정이라 minAvailable: 1 로 두면 그 한 개를 영영 못 비워
+  # 노드 드레인이 무한 대기한다(관리형 노드그룹 업그레이드가 멈춘다).
+  # 어차피 1벌이라 무중단이 불가능하므로 드레인을 막지 않는 쪽을 택한다.
+  maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: riot

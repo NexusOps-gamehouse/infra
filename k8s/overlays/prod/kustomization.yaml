@@ -50,7 +50,6 @@ patches:
   - path: patches/hpa-user.yaml
   - path: patches/hpa-post.yaml
   - path: patches/hpa-chat.yaml
-  - path: patches/hpa-riot.yaml
   # - path: patches/hpa-match.yaml
   # placeholder Secret 삭제 패치는 components/aws 로 옮겼다(dev 와 공통).
 

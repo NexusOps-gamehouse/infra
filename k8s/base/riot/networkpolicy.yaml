@@ -38,14 +38,6 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
-    # Redis — 캐시/레이트리미터/라운지 상태
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: redis
-      ports:
-        - protocol: TCP
-          port: 6379
     # 외부 API(Riot Games / LLM 등) — 클러스터 밖이라 podSelector 로 못 막는다.
     # 필요하면 overlay 에서 egress 방화벽(예: AWS Network Firewall)으로 더 좁힌다.
     - to:

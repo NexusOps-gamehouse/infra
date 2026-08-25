@@ -37,7 +37,7 @@ spec:
       # @Value("${rabbitmq.port}") int relayPort 가 int 변환에서 죽는다.
       # 환경변수는 application.yml 보다 우선순위가 높아 조용히 덮어쓴다.
       enableServiceLinks: false
-      # rabbitmq/redis 등 스테이트풀 의존성보다 먼저 뜨는 걸 막기 위해
+      # rabbitmq 등 스테이트풀 의존성보다 먼저 뜨는 걸 막기 위해
       # 실제 기동 순서는 Spring 의 재시도(backoff)에 맡긴다 — initContainer 로
       # 강하게 막지 않는 이유는 순서 강제가 오히려 배포 시간을 늘리기 때문이다.
       containers:
@@ -105,17 +105,6 @@ spec:
                 secretKeyRef:
                   name: rabbitmq-credentials
                   key: RABBITMQ_PASSWORD
-
-            - name: REDIS_HOST
-              valueFrom:
-                configMapKeyRef:
-                  name: match-config
-                  key: REDIS_HOST
-            - name: REDIS_PORT
-              valueFrom:
-                configMapKeyRef:
-                  name: match-config
-                  key: REDIS_PORT
 
           resources:
             requests:

@@ -53,14 +53,6 @@ spec:
       ports:
         - protocol: TCP
           port: 5672
-    # Redis — 캐시/레이트리미터/라운지 상태
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: redis
-      ports:
-        - protocol: TCP
-          port: 6379
     # user 서비스 호출 (crew/client)
     - to:
         - podSelector:

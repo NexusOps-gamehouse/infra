@@ -39,7 +39,6 @@ patches:
   - path: patches/hpa-user.yaml
   - path: patches/hpa-post.yaml
   - path: patches/hpa-chat.yaml
-  - path: patches/hpa-riot.yaml
   # - path: patches/hpa-match.yaml
 
 # 로컬 이미지는 하나의 `gamehouse` 저장소에 서비스별 태그를 붙인다

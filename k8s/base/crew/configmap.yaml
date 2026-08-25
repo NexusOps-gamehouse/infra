@@ -15,5 +15,3 @@ data:
   CORS_ALLOWED_ORIGINS: "https://gamehouse.example.com"
   DB_PORT: "5432"
   DB_NAME: "duo"
-  REDIS_HOST: "redis.gamehouse.svc.cluster.local"
-  REDIS_PORT: "6379"
