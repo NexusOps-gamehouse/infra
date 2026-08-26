@@ -1,11 +1,16 @@
-name: gamehouse
+name: gamehouse-main
 
 services:
-  # 채팅 메시지 전달을 위한 STOMP 브로커.
-  # 외부에 공개하지 않고 backend-net을 통해 Backend에서만 접근한다.
+
+  # ================================================================
+  # RabbitMQ
+  # AMQP 5672  : 서비스 간 이벤트
+  # STOMP 61613: Chat WebSocket relay
+  # 외부에는 공개하지 않는다.
+  # ================================================================
   rabbitmq:
-    build: ../infra/rabbitmq
-    container_name: gamehouse-rabbitmq
+    build: ./rabbitmq
+    container_name: gamehouse-main-rabbitmq
 
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-appuser}
@@ -24,44 +29,46 @@ services:
       retries: 5
       start_period: 20s
 
+    restart: unless-stopped
 
-  backend:
-    build: ../backend
-    image: nexusops0713/gamehouse:backend-${BACKEND_VERSION:-main}
 
+  # ================================================================
+  # User Service
+  # App 8081 / Actuator 8181
+  # DB: user_svc / duo_user
+  # ================================================================
+  user:
+    image: nexusops0713/gamehouse:user-main
     platform: linux/amd64
-
-    # main 태그가 갱신될 수 있으므로 실행 시 registry의 이미지를 확인한다.
     pull_policy: always
-
-    container_name: gamehouse-backend
+    container_name: gamehouse-main-user
 
     depends_on:
       rabbitmq:
         condition: service_healthy
 
     environment:
-      # ---- JVM 메모리 제한 -----------------------------------------------
       MALLOC_ARENA_MAX: "2"
-      JAVA_TOOL_OPTIONS: "-Xmx200m -Xss512k -XX:MaxDirectMemorySize=64m"
 
-      # ---- Main RDS ------------------------------------------------------
       DB_URL: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
-      DB_USERNAME: ${DB_USERNAME:-duo}
-      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      USER_DB_USERNAME: ${USER_DB_USERNAME:?USER_DB_USERNAME is required}
+      USER_DB_PASSWORD: ${USER_DB_PASSWORD:?USER_DB_PASSWORD is required}
 
-      # ---- Application ---------------------------------------------------
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
-      UPLOAD_DIR: /app/uploads
-      RIOT_API_KEY: ${RIOT_API_KEY:?RIOT_API_KEY is required}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
 
-      # ---- RabbitMQ ------------------------------------------------------
+      UPLOAD_DIR: /app/uploads
+
       RABBITMQ_HOST: rabbitmq
-      RABBITMQ_STOMP_PORT: 61613
+      RABBITMQ_AMQP_PORT: ${RABBITMQ_AMQP_PORT:-5672}
       RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-appuser}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+
+      USER_SERVICE_URL: http://user:8081
+      POST_SERVICE_URL: http://post:8082
+      CHAT_SERVICE_URL: http://chat:8083
+      RIOT_SERVICE_URL: http://riot:8084
 
     volumes:
       - backend-uploads:/app/uploads
@@ -70,21 +77,168 @@ services:
       - backend-net
 
     ports:
-      # ALB → EC2:8080 → Backend Container:8080
-      - "8080:8080"
-
-      # EC2 내부에서 Actuator 확인용
       - "127.0.0.1:8081:8081"
+      - "127.0.0.1:8181:8181"
 
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8081"]
       interval: 10s
       timeout: 3s
-      retries: 5
-      start_period: 20s
+      retries: 10
+      start_period: 30s
+
+    restart: unless-stopped
 
 
-# Backend ↔ RabbitMQ 내부 통신용 네트워크
+  # ================================================================
+  # Post Service
+  # App 8082 / Actuator 8182
+  # DB: post_svc / duo_post
+  # ================================================================
+  post:
+    image: nexusops0713/gamehouse:post-main
+    platform: linux/amd64
+    pull_policy: always
+    container_name: gamehouse-main-post
+
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+    environment:
+      MALLOC_ARENA_MAX: "2"
+
+      DB_URL: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
+      POST_DB_USERNAME: ${POST_DB_USERNAME:?POST_DB_USERNAME is required}
+      POST_DB_PASSWORD: ${POST_DB_PASSWORD:?POST_DB_PASSWORD is required}
+
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_AMQP_PORT: ${RABBITMQ_AMQP_PORT:-5672}
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-appuser}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+
+      USER_SERVICE_URL: http://user:8081
+      POST_SERVICE_URL: http://post:8082
+      CHAT_SERVICE_URL: http://chat:8083
+      RIOT_SERVICE_URL: http://riot:8084
+
+    networks:
+      - backend-net
+
+    ports:
+      - "127.0.0.1:8082:8082"
+      - "127.0.0.1:8182:8182"
+
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8082"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+    restart: unless-stopped
+
+
+  # ================================================================
+  # Chat Service
+  # App 8083 / Actuator 8183
+  # DB: chat_svc / duo_chat
+  # ================================================================
+  chat:
+    image: nexusops0713/gamehouse:chat-main
+    platform: linux/amd64
+    pull_policy: always
+    container_name: gamehouse-main-chat
+
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+    environment:
+      MALLOC_ARENA_MAX: "2"
+
+      DB_URL: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
+      CHAT_DB_USERNAME: ${CHAT_DB_USERNAME:?CHAT_DB_USERNAME is required}
+      CHAT_DB_PASSWORD: ${CHAT_DB_PASSWORD:?CHAT_DB_PASSWORD is required}
+
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_AMQP_PORT: ${RABBITMQ_AMQP_PORT:-5672}
+      RABBITMQ_STOMP_PORT: ${RABBITMQ_STOMP_PORT:-61613}
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-appuser}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+
+      USER_SERVICE_URL: http://user:8081
+      POST_SERVICE_URL: http://post:8082
+      CHAT_SERVICE_URL: http://chat:8083
+      RIOT_SERVICE_URL: http://riot:8084
+
+    networks:
+      - backend-net
+
+    ports:
+      - "127.0.0.1:8083:8083"
+      - "127.0.0.1:8183:8183"
+
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8083"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+    restart: unless-stopped
+
+
+  # ================================================================
+  # Riot Service
+  # App 8084 / Actuator 8184
+  # DB / RabbitMQ 사용하지 않음
+  # ================================================================
+  riot:
+    image: nexusops0713/gamehouse:riot-main
+    platform: linux/amd64
+    pull_policy: always
+    container_name: gamehouse-main-riot
+
+    environment:
+      MALLOC_ARENA_MAX: "2"
+
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+
+      RIOT_API_KEY: ${RIOT_API_KEY:?RIOT_API_KEY is required}
+
+      USER_SERVICE_URL: http://user:8081
+      POST_SERVICE_URL: http://post:8082
+      CHAT_SERVICE_URL: http://chat:8083
+      RIOT_SERVICE_URL: http://riot:8084
+
+    networks:
+      - backend-net
+
+    ports:
+      - "127.0.0.1:8084:8084"
+      - "127.0.0.1:8184:8184"
+
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8084"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+    restart: unless-stopped
+
+
 networks:
   backend-net:
     driver: bridge
