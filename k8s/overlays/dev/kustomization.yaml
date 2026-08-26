@@ -39,6 +39,21 @@ patches:
   # - path: patches/configmap-match.yaml
   # - path: patches/configmap-crew.yaml
   - path: patches/configmap-riot.yaml
+  # base 의 5432 egress 는 in-cluster postgres 를 본다 — dev/prod 는 RDS(클러스터 밖)라
+  # 매칭되지 않는다. 관리 포트 ingress 도 클러스터 안 파드만 허용해 ALB 헬스체크가 막힌다.
+  # 두 구멍을 서비스별로 ipBlock 규칙을 덧붙여 메운다.
+  - path: patches/networkpolicy-user.yaml
+    target:
+      kind: NetworkPolicy
+      name: user
+  - path: patches/networkpolicy-post.yaml
+    target:
+      kind: NetworkPolicy
+      name: post
+  - path: patches/networkpolicy-chat.yaml
+    target:
+      kind: NetworkPolicy
+      name: chat
   - path: patches/replicas-user.yaml
   - path: patches/replicas-post.yaml
   - path: patches/replicas-chat.yaml
