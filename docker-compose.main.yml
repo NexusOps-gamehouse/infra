@@ -77,7 +77,7 @@ services:
       - backend-net
 
     ports:
-      - "127.0.0.1:8081:8081"
+      - "8081:8081"
       - "127.0.0.1:8181:8181"
 
     healthcheck:
@@ -130,7 +130,7 @@ services:
       - backend-net
 
     ports:
-      - "127.0.0.1:8082:8082"
+      - "8082:8082"
       - "127.0.0.1:8182:8182"
 
     healthcheck:
@@ -184,7 +184,7 @@ services:
       - backend-net
 
     ports:
-      - "127.0.0.1:8083:8083"
+      - "8083:8083"
       - "127.0.0.1:8183:8183"
 
     healthcheck:
@@ -226,7 +226,7 @@ services:
       - backend-net
 
     ports:
-      - "127.0.0.1:8084:8084"
+      - "8084:8084"
       - "127.0.0.1:8184:8184"
 
     healthcheck:
