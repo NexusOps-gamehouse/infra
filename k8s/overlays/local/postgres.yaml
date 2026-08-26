@@ -65,7 +65,7 @@ metadata:
   namespace: gamehouse
 type: Opaque
 # local 전용 더미값 — kind 로컬 클러스터 밖으로 나가지 않으므로 커밋해도 안전하다.
-# prod 에서는 이 Secret 자체가 존재하지 않는다(RDS 는 overlays/prod/external-secrets.yaml 로 관리).
+# prod 에서는 이 Secret 자체가 존재하지 않는다(RDS 는 components/aws/external-secrets/ 로 관리).
 stringData:
   POSTGRES_DB: "duo"
   POSTGRES_USER: "duo"
