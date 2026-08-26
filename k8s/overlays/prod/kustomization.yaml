@@ -39,8 +39,6 @@ patches:
   # - path: patches/configmap-match.yaml
   # - path: patches/configmap-crew.yaml
   - path: patches/configmap-riot.yaml
-  - path: patches/serviceaccount-user.yaml
-  - path: patches/serviceaccount-post.yaml
   - path: patches/replicas-user.yaml
   - path: patches/replicas-post.yaml
   - path: patches/replicas-chat.yaml

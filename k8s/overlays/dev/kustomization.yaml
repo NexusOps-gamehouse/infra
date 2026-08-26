@@ -32,8 +32,6 @@ components:
 patches:
   - path: patches/ingress.yaml
   - path: patches/serviceaccount-external-secrets.yaml
-  - path: patches/serviceaccount-user.yaml
-  - path: patches/serviceaccount-post.yaml
   - path: patches/configmap-user.yaml
   - path: patches/configmap-post.yaml
   - path: patches/configmap-chat.yaml
