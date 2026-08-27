@@ -28,12 +28,13 @@ resources:
   - external-secrets/external-secret-jwt.yaml
   - external-secrets/external-secret-rabbitmq.yaml
   - external-secrets/external-secret-riot.yaml
+  - external-secrets/external-secret-llm.yaml
   - external-secrets/external-secret-db-user.yaml
   - external-secrets/external-secret-db-post.yaml
   - external-secrets/external-secret-db-chat.yaml
   - external-secrets/external-secret-dockerhub.yaml
-  # match / crew — base/kustomization.yaml 에서 제외됨. 되살릴 때 같이 푼다.
-  # - external-secrets/external-secret-db-match.yaml
+  - external-secrets/external-secret-db-match.yaml
+  # crew — base/kustomization.yaml 에서 제외됨. 되살릴 때 같이 푼다.
   # - external-secrets/external-secret-db-crew.yaml
 
 patches:
@@ -41,10 +42,11 @@ patches:
   - path: patches/delete-secret-jwt.yaml
   - path: patches/delete-secret-rabbitmq.yaml
   - path: patches/delete-secret-riot.yaml
+  - path: patches/delete-secret-llm.yaml
   - path: patches/delete-secret-user-db.yaml
   - path: patches/delete-secret-post-db.yaml
   - path: patches/delete-secret-chat-db.yaml
-  # - path: patches/delete-secret-match-db.yaml
+  - path: patches/delete-secret-match-db.yaml
   # - path: patches/delete-secret-crew-db.yaml
 
   # 비공개 도커허브 레포 pull 자격증명을 각 ServiceAccount 에 붙인다.
@@ -53,5 +55,5 @@ patches:
   - path: patches/imagepullsecret-chat.yaml
   - path: patches/imagepullsecret-riot.yaml
   - path: patches/imagepullsecret-rabbitmq.yaml
-  # - path: patches/imagepullsecret-match.yaml
+  - path: patches/imagepullsecret-match.yaml
   # - path: patches/imagepullsecret-crew.yaml

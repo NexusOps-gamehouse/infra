@@ -36,7 +36,7 @@ patches:
   - path: patches/configmap-user.yaml
   - path: patches/configmap-post.yaml
   - path: patches/configmap-chat.yaml
-  # - path: patches/configmap-match.yaml
+  - path: patches/configmap-match.yaml
   # - path: patches/configmap-crew.yaml
   - path: patches/configmap-riot.yaml
   # base 의 5432 egress 는 in-cluster postgres 를 본다 — dev/prod 는 RDS(클러스터 밖)라
@@ -54,16 +54,20 @@ patches:
     target:
       kind: NetworkPolicy
       name: chat
+  - path: patches/networkpolicy-match.yaml
+    target:
+      kind: NetworkPolicy
+      name: match
   - path: patches/replicas-user.yaml
   - path: patches/replicas-post.yaml
   - path: patches/replicas-chat.yaml
-  # - path: patches/replicas-match.yaml
+  - path: patches/replicas-match.yaml
   # - path: patches/replicas-crew.yaml
   - path: patches/replicas-riot.yaml
   - path: patches/hpa-user.yaml
   - path: patches/hpa-post.yaml
   - path: patches/hpa-chat.yaml
-  # - path: patches/hpa-match.yaml
+  - path: patches/hpa-match.yaml
   # placeholder Secret 삭제 패치는 components/aws 로 옮겼다(dev 와 공통).
 
 # components/aws 의 ExternalSecret 경로 `gamehouse/ENV/...` 에서 ENV 세그먼트만
@@ -106,9 +110,9 @@ images:
   - name: gamehouse-chat
     newName: nexusops0713/gamehouse
     newTag: chat-REPLACE_AT_DEPLOY
-  # - name: gamehouse-match
-  #   newName: nexusops0713/gamehouse
-  #   newTag: match-REPLACE_AT_DEPLOY
+  - name: gamehouse-match
+    newName: nexusops0713/gamehouse
+    newTag: match-REPLACE_AT_DEPLOY
   # - name: gamehouse-crew
   #   newName: nexusops0713/gamehouse
   #   newTag: crew-REPLACE_AT_DEPLOY

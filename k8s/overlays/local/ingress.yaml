@@ -55,14 +55,19 @@ spec:
             pathType: Prefix
             backend:
               service: { name: chat, port: { number: 8080 } }
-          # match / crew — base/kustomization.yaml 에서 제외됨. 되살릴 때 같이 푼다.
+          - path: /api/match
+            pathType: Prefix
+            backend:
+              service: { name: match, port: { number: 8080 } }
+          # crew — base/kustomization.yaml 에서 제외됨. 되살릴 때 같이 푼다.
           # ingress-nginx 는 없는 백엔드를 해당 경로만 503 으로 흘려보내 여기서는 티가
           # 안 나지만, 같은 참조가 dev/prod 에서는 ALB reconcile 을 멈춰 세운다
           # (components/aws/ingress.yaml 의 같은 블록 참고). 두 파일을 항상 같이 푼다.
-          # - path: /api/match
-          #   pathType: Prefix
-          #   backend:
-          #     service: { name: match, port: { number: 8080 } }
+          #
+          # ⚠️ 여기에 경로가 없으면 아래 `/` 규칙이 대신 잡아 frontend nginx 로 간다.
+          #    브라우저로 GET 하면 index.html 이 200 OK 로 돌아와 "붙는 것처럼" 보이지만,
+          #    프론트의 POST 는 정적 파일에 대한 POST 라 405 가 되고 본문이 HTML 이라
+          #    에러 메시지도 안 잡힌다. 404 가 아니라서 원인이 잘 안 보인다.
           # - path: /api/crews
           #   pathType: Prefix
           #   backend:

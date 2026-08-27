@@ -85,6 +85,14 @@ spec:
                   name: gamehouse-jwt
                   key: JWT_SECRET
 
+            # AI 설명(ExplanationService) 용. dummy_key 면 규칙 기반 문구로 대체된다 —
+            # 검색 자체는 정상 응답하므로 키가 없어도 파드는 뜬다.
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: match-llm-secret
+                  key: LLM_API_KEY
+
             - name: RABBITMQ_HOST
               valueFrom:
                 configMapKeyRef:
