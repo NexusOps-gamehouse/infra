@@ -22,9 +22,10 @@ brew install kind kubectl kustomize
 echo "127.0.0.1 gamehouse.local" | sudo tee -a /etc/hosts
 ```
 
-### 이미지 build
+### 이미지 build — 모노레포(`backend/`)
 
-backend 서비스는 `backend/` 루트가 build context다.
+backend 서비스는 `backend/` 루트가 build context다. 각 서비스가 `:common` 을
+소스로 의존하므로 모듈 디렉터리만 넘기면 `settings.gradle` 도 `common/` 도 안 보인다.
 
 ```bash
 cd backend
@@ -38,6 +39,80 @@ docker build -t gamehouse:frontend-develop .
 cd ../infra/rabbitmq
 docker build -t gamehouse:rabbitmq-develop .
 ```
+
+### 이미지 build — 서비스별 레포
+
+MSA 레포 분리 후에는 **각 레포 루트가 곧 build context**다. `common` 은 함께
+빌드되지 않고 **GitHub Packages 에서 받아온다**(`gg.duo:common`).
+
+| 레포 | 포트 |
+|---|---|
+| `gamehouse-user` | 8081 |
+| `gamehouse-post` | 8082 |
+| `gamehouse-chat` | 8083 |
+| `gamehouse-riot` | 8084 |
+| `gamehouse-match` | 8085 |
+| `gamehouse-common` | — (라이브러리, 이미지 없음) |
+
+**사전 준비 — GPR 자격증명.** GitHub Packages 는 public 패키지도 읽기에 토큰이
+필요하다. 없으면 `common` 을 못 받아 빌드가 실패한다.
+
+토큰은 GitHub → Settings → Developer settings → **Personal access tokens (classic)**
+에서 `read:packages` 만 체크해 만든다. fine-grained 토큰은 GitHub Packages 의 Maven
+레지스트리를 아직 제대로 지원하지 않는다.
+
+아래를 **통째로** 붙여넣는다. `아이디` 에는 GitHub 로그인 아이디(**이메일 아님**),
+`PAT` 에는 토큰을 붙여넣고 엔터. **토큰은 화면에 안 보이는 게 정상이다.**
+
+```bash
+mkdir -p ~/.gradle && touch ~/.gradle/gradle.properties
+printf 'GitHub 아이디: '; read GPR_USER
+printf 'PAT (read:packages): '; read -s GPR_KEY; echo
+{ grep -v '^gpr\.' ~/.gradle/gradle.properties || true; \
+  echo "gpr.user=$GPR_USER"; echo "gpr.key=$GPR_KEY"; } > ~/.gradle/gp.new \
+  && mv ~/.gradle/gp.new ~/.gradle/gradle.properties
+unset GPR_USER GPR_KEY
+```
+
+기존 `gpr.*` 항목만 걷어내고 다시 넣으므로 여러 번 돌려도 중복되지 않고, 같은 파일의
+다른 설정(`org.gradle.jvmargs` 등)은 그대로 남는다. `read -s` 라 토큰이 화면에도 셸
+히스토리에도 남지 않는다. 이 파일은 레포가 아니라 홈 디렉터리에 있고, 머신당 한 번만
+하면 서비스 레포 전체에 적용된다.
+
+> ⚠️ **붙여넣는 블록에 `#` 주석을 넣지 않았다.** zsh 대화형 셸은 기본적으로 `#` 을 주석으로
+> 보지 않아(`interactive_comments` 미설정), 주석이 명령으로 실행된다. 특히 `gpr.*` 같은
+> 문자열은 glob 으로 해석되어 `zsh: no matches found: gpr.*` 가 뜬다 — 실제 명령은 그 뒤에
+> 정상 실행되지만 실패한 것처럼 보인다.
+
+확인 — 아이디가 찍히고 마지막 줄이 `1` 이면 된다:
+
+```bash
+grep '^gpr\.user' ~/.gradle/gradle.properties
+grep -c '^gpr\.key=.\+' ~/.gradle/gradle.properties
+```
+
+빌드는 레포마다 돌린다. 모노레포와 달리 `-f` 로 Dockerfile 을 지정하지 않는다.
+
+레포들이 같은 부모 디렉터리에 체크아웃되어 있다고 가정한다.
+
+```bash
+for svc in user post chat riot match; do
+  ( cd gamehouse-$svc \
+    && DOCKER_BUILDKIT=1 docker build \
+         --secret id=gpr,src=$HOME/.gradle/gradle.properties \
+         -t gamehouse:$svc-develop . )
+done
+```
+
+> ⚠️ **토큰을 `--build-arg` 로 넘기지 말 것.** 이미지 레이어 히스토리에 평문으로 남는다.
+> `--secret` 은 해당 `RUN` 동안만 마운트되고 레이어에 남지 않는다. 그래서
+> `DOCKER_BUILDKIT=1` 이 필요하다 — 구형 빌더는 `--secret` 을 모른다.
+
+이미지 태그(`gamehouse:<svc>-develop`)는 모노레포 때와 같다. **k8s 매니페스트는
+레포 구조를 모르므로 `overlays/local` 은 그대로 쓴다** — `kind load` 이후 절차도 동일하다.
+
+> `gamehouse-crew` 는 아직 비어 있다(`.git` 만 있음). 코드가 생기면 위 루프에 추가하고
+> `base/kustomization.yaml` 의 `- crew` 도 함께 푼다.
 
 ### kind 기동 및 배포
 
