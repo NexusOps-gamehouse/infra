@@ -45,7 +45,10 @@ spec:
       ports:
         - protocol: TCP
           port: 5432
-    # RabbitMQ — 도메인 이벤트 발행/구독
+    # RabbitMQ — 도메인 이벤트 발행/구독 + STOMP(WS) 릴레이.
+    # crew 코드에는 RabbitTemplate 도 @RabbitListener 도 없지만, CrewApplication 이
+    # gg.duo.common 을 스캔하고 거기 RabbitEventBridge(@RabbitListener)와
+    # RabbitDomainEventPublisher 가 있다 — 부팅 때 실제로 연결한다. 지우면 안 된다.
     - to:
         - podSelector:
             matchLabels:
@@ -53,19 +56,10 @@ spec:
       ports:
         - protocol: TCP
           port: 5672
-    # user 서비스 호출 (crew/client)
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: user
-      ports:
+        # 61613 — House 채팅(/ws-house)의 STOMP 릴레이. chat 과 같은 구조다.
+        # 빠지면 릴레이가 붙지 못해 파드는 뜨는데 채팅만 조용히 죽는다.
         - protocol: TCP
-          port: 8081
-    # chat 서비스 호출 (crew/client)
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: chat
-      ports:
-        - protocol: TCP
-          port: 8083
+          port: 61613
+    #
+    # 다른 서비스로 나가는 규칙은 없다 — crew 는 아무 서비스도 호출하지 않는다
+    # (configmap.yaml 주석 참고). 호출이 생기면 여기에 대상 파드와 포트를 함께 추가한다.

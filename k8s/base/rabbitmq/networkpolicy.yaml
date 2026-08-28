@@ -30,10 +30,15 @@ spec:
       ports:
         - protocol: TCP
           port: 5672
+    # STOMP 릴레이 — chat(/ws) 과 crew(/ws-house). 둘 다 파드가 여러 개라
+    # 브로커를 여기로 빼야 파드 간에 대화가 갈라지지 않는다.
     - from:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: chat
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: crew
       ports:
         - protocol: TCP
           port: 61613

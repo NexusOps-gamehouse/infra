@@ -55,7 +55,7 @@ echo "[4/7] 로컬 이미지 적재..."
 # 이름이 아니라 태그 전체를 나열한다 — overlays/local 의 newTag 와 반드시 같아야 한다.
 MISSING=()
 for tag in user-develop post-develop chat-develop riot-develop match-develop \
-           frontend-develop rabbitmq-3-1; do
+           crew-develop frontend-develop rabbitmq-3-1; do
   if docker image inspect "gamehouse:${tag}" >/dev/null 2>&1; then
     kind load docker-image "gamehouse:${tag}" --name "${CLUSTER_NAME}"
   else
@@ -79,9 +79,7 @@ echo "[6/7] infra/.env.k8s.local 의 외부 API 키 주입..."
 "${SCRIPT_DIR}/k8s-local-secrets.sh"
 
 echo "[7/7] 롤아웃 대기..."
-# crew 는 base/kustomization.yaml 에서 빠져 있다 — 여기 두면 없는
-# Deployment 를 180초씩 기다리다 만다. crew 는 추후 추가한다.
-for svc in user post chat riot match; do
+for svc in user post chat riot match crew; do
   kubectl -n gamehouse rollout status deployment/"${svc}" --timeout=180s || true
 done
 

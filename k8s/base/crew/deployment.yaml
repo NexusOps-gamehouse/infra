@@ -105,6 +105,15 @@ spec:
                 secretKeyRef:
                   name: rabbitmq-credentials
                   key: RABBITMQ_PASSWORD
+            # House 채팅 STOMP 릴레이용(:61613). chat 과 같은 값을 같은 ConfigMap 에서
+            # 읽지만 바인딩 경로는 다르다 — crew 는 spring.rabbitmq.stomp.port,
+            # chat 은 최상위 rabbitmq.port 다. 주입하는 환경변수 이름은 같으므로
+            # 여기 매니페스트는 두 서비스가 동일하다.
+            - name: RABBITMQ_STOMP_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: rabbitmq-config
+                  key: RABBITMQ_STOMP_PORT
 
           resources:
             requests:

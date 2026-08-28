@@ -34,8 +34,7 @@ resources:
   - external-secrets/external-secret-db-chat.yaml
   - external-secrets/external-secret-dockerhub.yaml
   - external-secrets/external-secret-db-match.yaml
-  # crew — base/kustomization.yaml 에서 제외됨. 되살릴 때 같이 푼다.
-  # - external-secrets/external-secret-db-crew.yaml
+  - external-secrets/external-secret-db-crew.yaml
 
 patches:
   # base 의 placeholder Secret 삭제 — ExternalSecret 이 같은 이름으로 다시 만든다.
@@ -47,7 +46,7 @@ patches:
   - path: patches/delete-secret-post-db.yaml
   - path: patches/delete-secret-chat-db.yaml
   - path: patches/delete-secret-match-db.yaml
-  # - path: patches/delete-secret-crew-db.yaml
+  - path: patches/delete-secret-crew-db.yaml
 
   # 비공개 도커허브 레포 pull 자격증명을 각 ServiceAccount 에 붙인다.
   - path: patches/imagepullsecret-user.yaml
@@ -56,4 +55,4 @@ patches:
   - path: patches/imagepullsecret-riot.yaml
   - path: patches/imagepullsecret-rabbitmq.yaml
   - path: patches/imagepullsecret-match.yaml
-  # - path: patches/imagepullsecret-crew.yaml
+  - path: patches/imagepullsecret-crew.yaml

@@ -13,7 +13,7 @@
 # 전제(이 트리 밖):
 #   1) dev EKS 클러스터 + AWS Load Balancer Controller + External Secrets Operator
 #      + metrics-server (EKS 기본 탑재가 아니다 — 없으면 HPA 가 <unknown> 으로 멈춘다)
-#   2) dev 전용 RDS(PostgreSQL) + user_/post_/chat_ 스키마와 서비스별 최소권한 계정
+#   2) dev 전용 RDS(PostgreSQL) + user_/post_/chat_/match_/crew_ 스키마와 서비스별 최소권한 계정
 #   3) AWS Secrets Manager 에 gamehouse/dev/jwt, gamehouse/dev/rabbitmq,
 #      gamehouse/dev/riot, gamehouse/dev/db/<service>,
 #      gamehouse/dev/dockerhub 등록
@@ -36,8 +36,7 @@ patches:
   - path: patches/configmap-post.yaml
   - path: patches/configmap-chat.yaml
   - path: patches/configmap-match.yaml
-  # crew — base/kustomization.yaml 에서 제외됨. 되살릴 때 같이 푼다.
-  # - path: patches/configmap-crew.yaml
+  - path: patches/configmap-crew.yaml
   - path: patches/configmap-riot.yaml
   # base 의 5432 egress 는 in-cluster postgres 를 본다 — dev/prod 는 RDS(클러스터 밖)라
   # 매칭되지 않는다. 관리 포트 ingress 도 클러스터 안 파드만 허용해 ALB 헬스체크가 막힌다.
@@ -58,16 +57,21 @@ patches:
     target:
       kind: NetworkPolicy
       name: match
+  - path: patches/networkpolicy-crew.yaml
+    target:
+      kind: NetworkPolicy
+      name: crew
   - path: patches/replicas-user.yaml
   - path: patches/replicas-post.yaml
   - path: patches/replicas-chat.yaml
   - path: patches/replicas-match.yaml
-  # - path: patches/replicas-crew.yaml
+  - path: patches/replicas-crew.yaml
   - path: patches/replicas-riot.yaml
   - path: patches/hpa-user.yaml
   - path: patches/hpa-post.yaml
   - path: patches/hpa-chat.yaml
   - path: patches/hpa-match.yaml
+  - path: patches/hpa-crew.yaml
   - path: patches/pdb-chat.yaml
 
 # components/aws 의 ExternalSecret 경로 `gamehouse/ENV/...` 에서 ENV 세그먼트만
@@ -95,9 +99,9 @@ images:
   #   cd k8s/overlays/dev
   #   kustomize edit set image gamehouse-user=nexusops0713/gamehouse:user-$GIT_SHA
   #
-  # base 가 실제 레포 대신 논리 이름(gamehouse-user 등)을 쓰는 이유는, 4개 서비스가
+  # base 가 실제 레포 대신 논리 이름(gamehouse-user 등)을 쓰는 이유는, 6개 서비스가
   # 레포 하나를 태그 접두사로 공유하기 때문이다. base 에 실제 레포명을 쓰면 매칭 이름이
-  # 4개 다 같아져 서비스 하나만 골라 태그를 바꿀 수 없다(prod 오버레이 주석 참고).
+  # 6개 다 같아져 서비스 하나만 골라 태그를 바꿀 수 없다(prod 오버레이 주석 참고).
   - name: gamehouse-user
     newName: nexusops0713/gamehouse
     newTag: user-REPLACE_AT_DEPLOY
@@ -110,9 +114,9 @@ images:
   - name: gamehouse-match
     newName: nexusops0713/gamehouse
     newTag: match-REPLACE_AT_DEPLOY
-  # - name: gamehouse-crew
-  #   newName: nexusops0713/gamehouse
-  #   newTag: crew-REPLACE_AT_DEPLOY
+  - name: gamehouse-crew
+    newName: nexusops0713/gamehouse
+    newTag: crew-REPLACE_AT_DEPLOY
   - name: gamehouse-riot
     newName: nexusops0713/gamehouse
     newTag: riot-REPLACE_AT_DEPLOY

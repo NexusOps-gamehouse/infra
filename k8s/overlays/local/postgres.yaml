@@ -15,9 +15,9 @@
 #         kubectl apply -k k8s/overlays/local
 #      2) 이미 도는 DB 에 계정만 직접 넣는다 (데이터 보존)
 #         kubectl -n gamehouse exec deploy/postgres -- psql -U duo -d duo -c \
-#           "CREATE USER duo_match WITH PASSWORD 'kind-dev-only-match';
-#            CREATE SCHEMA match_svc AUTHORIZATION duo_match;
-#            ALTER ROLE duo_match SET search_path TO match_svc;"
+#           "CREATE USER duo_crew WITH PASSWORD 'kind-dev-only-crew';
+#            CREATE SCHEMA crew_svc AUTHORIZATION duo_crew;
+#            ALTER ROLE duo_crew SET search_path TO crew_svc;"
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -42,6 +42,7 @@ data:
     CREATE USER duo_post WITH PASSWORD 'kind-dev-only-post';
     CREATE USER duo_chat WITH PASSWORD 'kind-dev-only-chat';
     CREATE USER duo_match WITH PASSWORD 'kind-dev-only-match';
+    CREATE USER duo_crew WITH PASSWORD 'kind-dev-only-crew';
 
     -- AUTHORIZATION 이 핵심이다. 소유자가 되어야 ddl-auto: update 가 그 안에서
     -- 테이블을 만들 수 있다. GRANT 로 읽기·쓰기만 주면 부팅할 때 막힌다.
@@ -49,6 +50,7 @@ data:
     CREATE SCHEMA post_svc AUTHORIZATION duo_post;
     CREATE SCHEMA chat_svc AUTHORIZATION duo_chat;
     CREATE SCHEMA match_svc AUTHORIZATION duo_match;
+    CREATE SCHEMA crew_svc AUTHORIZATION duo_crew;
 
     -- 접속하면 자기 스키마를 먼저 보게 한다. Hibernate 의 default_schema 는
     -- Hibernate 가 만든 쿼리에만 적용되므로 네이티브 쿼리까지 덮으려면 이쪽도 건다.
@@ -56,13 +58,7 @@ data:
     ALTER ROLE duo_post SET search_path TO post_svc;
     ALTER ROLE duo_chat SET search_path TO chat_svc;
     ALTER ROLE duo_match SET search_path TO match_svc;
-
-    -- crew 는 backend 에 모듈이 없어 아직 대상이 아니다.
-    -- 코드가 생기면 아래를 살리고 overlays/local/patches/secret-db-crew.yaml 의
-    -- 비밀번호와 맞출 것.
-    -- CREATE USER duo_crew WITH PASSWORD 'kind-dev-only-crew';
-    -- CREATE SCHEMA crew_svc AUTHORIZATION duo_crew;
-    -- ALTER ROLE duo_crew SET search_path TO crew_svc;
+    ALTER ROLE duo_crew SET search_path TO crew_svc;
 
     -- riot 은 소유 테이블이 0개라 DB 를 아예 쓰지 않는다(V1__split_schemas.sql 참고).
 

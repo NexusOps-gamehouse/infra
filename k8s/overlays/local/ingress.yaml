@@ -9,7 +9,7 @@ metadata:
   name: gamehouse
   namespace: gamehouse
   annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"   # /ws 장시간 연결 유지
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"   # /ws · /ws-house 장시간 연결 유지
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
 spec:
   ingressClassName: nginx
@@ -30,6 +30,18 @@ spec:
             backend:
               service: { name: user, port: { number: 8080 } }
           - path: /api/notifications
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          # 프로필 이미지 등 업로드 파일. user 가 파일을 소유하고 정적 리소스로 서빙한다
+          # (user/config/WebConfig 의 addResourceHandler("/uploads/**"), 인증 불필요).
+          # /api 로 시작하지 않아 눈에 잘 안 띄지만 빠뜨리면 이미지가 전부 깨진다.
+          #
+          # ⚠️ S3 로 옮기면 이 규칙은 지운다. local 은 replicas 1 이라 지금은 멀쩡해
+          #    보이지만, 파일이 컨테이너 쓰기 레이어에 쌓이는 구조라 파드를 재시작하면
+          #    사라진다. dev/prod 는 replicas 2~3 이라 더 심하게 깨진다 —
+          #    components/aws/ingress.yaml 의 같은 블록에 자세히 적어 뒀다.
+          - path: /uploads
             pathType: Prefix
             backend:
               service: { name: user, port: { number: 8080 } }
@@ -59,19 +71,30 @@ spec:
             pathType: Prefix
             backend:
               service: { name: match, port: { number: 8080 } }
-          # crew — base/kustomization.yaml 에서 제외됨. 되살릴 때 같이 푼다.
-          # ingress-nginx 는 없는 백엔드를 해당 경로만 503 으로 흘려보내 여기서는 티가
-          # 안 나지만, 같은 참조가 dev/prod 에서는 ALB reconcile 을 멈춰 세운다
-          # (components/aws/ingress.yaml 의 같은 블록 참고). 두 파일을 항상 같이 푼다.
-          #
-          # ⚠️ 여기에 경로가 없으면 아래 `/` 규칙이 대신 잡아 frontend nginx 로 간다.
-          #    브라우저로 GET 하면 index.html 이 200 OK 로 돌아와 "붙는 것처럼" 보이지만,
-          #    프론트의 POST 는 정적 파일에 대한 POST 라 405 가 되고 본문이 HTML 이라
-          #    에러 메시지도 안 잡힌다. 404 가 아니라서 원인이 잘 안 보인다.
-          # - path: /api/crews
-          #   pathType: Prefix
-          #   backend:
-          #     service: { name: crew, port: { number: 8080 } }
+          # crew — House(크루) 목록·상세·공지·일정·채팅.
+          - path: /api/crew
+            pathType: Prefix
+            backend:
+              service: { name: crew, port: { number: 8080 } }
+          # House 채팅 WebSocket(SockJS/STOMP). chat 의 /ws 와 경로를 나눈 이유는
+          # crew/config/WebSocketConfig.java 주석 참고 — 같은 /ws 면 갈라낼 수 없다.
+          - path: /ws-house
+            pathType: Prefix
+            backend:
+              service: { name: crew, port: { number: 8080 } }
+          # 아래 둘은 프론트가 아직 목 저장소를 쓰고 있어(frontend/src/mocks/houseStorage.js)
+          # 실제 호출은 없다. 그래도 미리 뚫어 둔다 — 백엔드에 이미 있는 경로라
+          # 프론트가 붙는 순간 인프라 변경 없이 바로 동작해야 하기 때문이다.
+          # ⚠️ frontend/vite.config.js 의 프록시에는 아직 없다. 프론트를 붙일 때
+          #    거기도 같이 넣어야 개발(vite)과 운영(Ingress)이 갈리지 않는다.
+          - path: /api/houses
+            pathType: Prefix
+            backend:
+              service: { name: crew, port: { number: 8080 } }
+          - path: /api/shop
+            pathType: Prefix
+            backend:
+              service: { name: crew, port: { number: 8080 } }
           # riot 은 외부 노출 없음 — 의도적으로 경로가 없다.
           - path: /
             pathType: Prefix

@@ -37,7 +37,7 @@ patches:
   - path: patches/configmap-post.yaml
   - path: patches/configmap-chat.yaml
   - path: patches/configmap-match.yaml
-  # - path: patches/configmap-crew.yaml
+  - path: patches/configmap-crew.yaml
   - path: patches/configmap-riot.yaml
   # base 의 5432 egress 는 in-cluster postgres 를 본다 — dev/prod 는 RDS(클러스터 밖)라
   # 매칭되지 않는다. 관리 포트 ingress 도 클러스터 안 파드만 허용해 ALB 헬스체크가 막힌다.
@@ -58,16 +58,21 @@ patches:
     target:
       kind: NetworkPolicy
       name: match
+  - path: patches/networkpolicy-crew.yaml
+    target:
+      kind: NetworkPolicy
+      name: crew
   - path: patches/replicas-user.yaml
   - path: patches/replicas-post.yaml
   - path: patches/replicas-chat.yaml
   - path: patches/replicas-match.yaml
-  # - path: patches/replicas-crew.yaml
+  - path: patches/replicas-crew.yaml
   - path: patches/replicas-riot.yaml
   - path: patches/hpa-user.yaml
   - path: patches/hpa-post.yaml
   - path: patches/hpa-chat.yaml
   - path: patches/hpa-match.yaml
+  - path: patches/hpa-crew.yaml
   # placeholder Secret 삭제 패치는 components/aws 로 옮겼다(dev 와 공통).
 
 # components/aws 의 ExternalSecret 경로 `gamehouse/ENV/...` 에서 ENV 세그먼트만
@@ -92,8 +97,8 @@ images:
   #
   # base 가 실제 레포 대신 서비스별 논리 이름(gamehouse-user 등)을 쓰는 이유가
   # 이것이다. images: 트랜스포머의 name 은 태그를 뺀 이미지 이름으로 매칭하므로,
-  # base 가 nexusops0713/gamehouse 를 직접 쓰면 4개 서비스가 전부 같은 이름이 되어
-  # 항목 하나가 나머지 3개까지 덮어쓴다. 경고도 에러도 없이 조용히 일어난다.
+  # base 가 nexusops0713/gamehouse 를 직접 쓰면 6개 서비스가 전부 같은 이름이 되어
+  # 항목 하나가 나머지 5개까지 덮어쓴다. 경고도 에러도 없이 조용히 일어난다.
   #
   # name 에 태그까지 적으면(nexusops0713/gamehouse:user-OLD) 구분은 되지만 쓸 수 없다.
   # 매칭하려면 "지금 박혀 있는 태그"를 알아야 하는데 그 값이 배포마다 바뀌기 때문이다.
@@ -113,9 +118,9 @@ images:
   - name: gamehouse-match
     newName: nexusops0713/gamehouse
     newTag: match-REPLACE_AT_DEPLOY
-  # - name: gamehouse-crew
-  #   newName: nexusops0713/gamehouse
-  #   newTag: crew-REPLACE_AT_DEPLOY
+  - name: gamehouse-crew
+    newName: nexusops0713/gamehouse
+    newTag: crew-REPLACE_AT_DEPLOY
   - name: gamehouse-riot
     newName: nexusops0713/gamehouse
     newTag: riot-REPLACE_AT_DEPLOY
