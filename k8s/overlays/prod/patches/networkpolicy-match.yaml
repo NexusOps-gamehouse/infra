@@ -1,0 +1,37 @@
+# ⚠️ CHANGE_ME: prod VPC 의 실제 서브넷 CIDR 두 개.
+#   - RDS 가 있는 프라이빗 서브넷 (예: 10.0.16.0/20)
+#   - ALB 가 있는 퍼블릭 서브넷   (예: 10.0.0.0/20)
+# VPC CIDR 통째로 열지 마라 — EKS VPC CNI 는 파드에도 VPC IP 를 주므로
+# VPC 전체를 열면 "모든 파드가 DB/actuator 에 접근 가능"이 되어 default-deny 가 무의미해진다.
+#
+# [egress 5432] base 의 규칙은 podSelector: postgres 를 본다. local(kind) 의 in-cluster
+# postgres 파드용이다. dev/prod 의 DB 는 클러스터 밖 RDS 라 그 셀렉터에 영원히 매칭되지
+# 않는다. NetworkPolicy 규칙은 합집합이므로 base 규칙은 그대로 두고(매칭 대상이 없어
+# 무해하다) 여기에 ipBlock 규칙을 하나 더 붙인다.
+#
+# [ingress 8185] base 는 관리 포트를 namespaceSelector: {} 로만 열어 둔다. 이건
+# "클러스터 안의 파드"만 매칭한다. ALB 헬스체크는 파드가 아니라 VPC 의 ALB ENI 에서
+# 오므로 매칭되지 않아 타깃이 전부 unhealthy 가 되고 ALB 가 502 를 낸다.
+# (kubelet 의 startup/readiness/liveness 프로브는 노드에서 오고 NetworkPolicy 적용을
+#  받지 않으므로 이 규칙과 무관하다 — 프로브는 지금도 정상이다.)
+#
+# match 는 ALB 에 노출되는 서비스다(/api/match). riot 처럼 내부 전용이면 이 패치가
+# 필요 없지만, match 는 8185 헬스체크 경로를 열어야 타깃이 healthy 가 된다.
+- op: add
+  path: /spec/egress/-
+  value:
+    to:
+      - ipBlock:
+          cidr: CHANGE_ME_RDS_SUBNET_CIDR
+    ports:
+      - protocol: TCP
+        port: 5432
+- op: add
+  path: /spec/ingress/-
+  value:
+    from:
+      - ipBlock:
+          cidr: CHANGE_ME_ALB_SUBNET_CIDR
+    ports:
+      - protocol: TCP
+        port: 8185

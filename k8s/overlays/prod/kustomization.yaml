@@ -1,0 +1,153 @@
+# prod — EKS + ALB + RDS. frontend 없음(S3+CloudFront).
+#
+# ALB·External Secrets·IRSA·PDB 구조는 components/aws 에 있고 dev 오버레이와
+# 공유한다. 여기 있는 건 prod 고유의 "값"뿐이다 — 즉 이 트리에서 실행되는 구조는
+# 이미 dev 에서 한 번 돈 것이어야 한다. dev 를 건너뛰고 여기로 오면 그 구조는
+# prod 가 첫 실행이 된다.
+#
+# 배포 전 필수 준비물 (이 kustomize 트리 밖):
+#   1) EKS 클러스터 + AWS Load Balancer Controller + External Secrets Operator
+#      + metrics-server 설치 (metrics-server 는 EKS 기본 탑재가 아니다 —
+#      없으면 HPA 가 TARGETS 에 <unknown> 을 띄운 채 스케일하지 않는다)
+#   2) RDS(PostgreSQL) 인스턴스 생성 + user_/post_/chat_/match_/crew_ 스키마와
+#      서비스별 DB 계정 생성 (섹션11 — "자기 스키마만 읽고 쓴다")
+#   3) AWS Secrets Manager 에 gamehouse/prod/jwt, gamehouse/prod/rabbitmq,
+#      gamehouse/prod/riot, gamehouse/prod/db/<service>,
+#      gamehouse/prod/dockerhub 시크릿 등록
+#   4) IAM 역할 4종(gamehouse-user-role, gamehouse-post-role, gamehouse-external-secrets-role,
+#      AWS Load Balancer Controller 역할) 생성 후 이 디렉터리의 CHANGE_ME 를 실제 값으로 교체
+#   5) 이미지 태그 고정 — 아래 images: 의 REPLACE_AT_DEPLOY 를 CI 가 실제 커밋 SHA로
+#      바꾼다(고의로 존재하지 않는 태그를 기본값으로 둬서, 안 바꾸고 배포하면
+#      ImagePullBackOff 로 "눈에 띄게" 실패하게 만들었다 — 조용히 develop 이미지가
+#      prod 에 깔리는 사고를 막기 위함).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - env-configmap.yaml
+
+components:
+  - ../../components/aws
+
+patches:
+  - path: patches/ingress.yaml
+  - path: patches/serviceaccount-external-secrets.yaml
+  - path: patches/configmap-user.yaml
+  - path: patches/configmap-post.yaml
+  - path: patches/configmap-chat.yaml
+  - path: patches/configmap-match.yaml
+  - path: patches/configmap-crew.yaml
+  - path: patches/configmap-riot.yaml
+  # base 의 5432 egress 는 in-cluster postgres 를 본다 — dev/prod 는 RDS(클러스터 밖)라
+  # 매칭되지 않는다. 관리 포트 ingress 도 클러스터 안 파드만 허용해 ALB 헬스체크가 막힌다.
+  # 두 구멍을 서비스별로 ipBlock 규칙을 덧붙여 메운다.
+  - path: patches/networkpolicy-user.yaml
+    target:
+      kind: NetworkPolicy
+      name: user
+  - path: patches/networkpolicy-post.yaml
+    target:
+      kind: NetworkPolicy
+      name: post
+  - path: patches/networkpolicy-chat.yaml
+    target:
+      kind: NetworkPolicy
+      name: chat
+  - path: patches/networkpolicy-match.yaml
+    target:
+      kind: NetworkPolicy
+      name: match
+  - path: patches/networkpolicy-crew.yaml
+    target:
+      kind: NetworkPolicy
+      name: crew
+  - path: patches/replicas-user.yaml
+  - path: patches/replicas-post.yaml
+  - path: patches/replicas-chat.yaml
+  - path: patches/replicas-match.yaml
+  - path: patches/replicas-crew.yaml
+  - path: patches/replicas-riot.yaml
+  - path: patches/hpa-user.yaml
+  - path: patches/hpa-post.yaml
+  - path: patches/hpa-chat.yaml
+  - path: patches/hpa-match.yaml
+  - path: patches/hpa-crew.yaml
+  # placeholder Secret 삭제 패치는 components/aws 로 옮겼다(dev 와 공통).
+
+# components/aws 의 ExternalSecret 경로 `gamehouse/ENV/...` 에서 ENV 세그먼트만
+# env-configmap.yaml 의 값으로 바꾼다. dev 오버레이와 동일한 블록이다.
+replacements:
+  - source:
+      kind: ConfigMap
+      name: gamehouse-env
+      fieldPath: data.ENV
+    targets:
+      - select:
+          kind: ExternalSecret
+        fieldPaths:
+          - spec.data.*.remoteRef.key
+        options:
+          delimiter: /
+          index: 1
+
+images:
+  # CI(backend·frontend 의 ci-cd.yml)는 레포 하나에 서비스를 태그 접두사로 구분해
+  # 푸시한다 — nexusops0713/gamehouse:<service>-<sha>
+  #
+  # base 가 실제 레포 대신 서비스별 논리 이름(gamehouse-user 등)을 쓰는 이유가
+  # 이것이다. images: 트랜스포머의 name 은 태그를 뺀 이미지 이름으로 매칭하므로,
+  # base 가 nexusops0713/gamehouse 를 직접 쓰면 6개 서비스가 전부 같은 이름이 되어
+  # 항목 하나가 나머지 5개까지 덮어쓴다. 경고도 에러도 없이 조용히 일어난다.
+  #
+  # name 에 태그까지 적으면(nexusops0713/gamehouse:user-OLD) 구분은 되지만 쓸 수 없다.
+  # 매칭하려면 "지금 박혀 있는 태그"를 알아야 하는데 그 값이 배포마다 바뀌기 때문이다.
+  # 논리 이름은 바뀌지 않으므로 몇 번을 호출하든 안전하다.
+  #
+  # CI 는 서비스별로 이렇게 지정한다:
+  #   kustomize edit set image gamehouse-user=nexusops0713/gamehouse:user-$GIT_SHA
+  - name: gamehouse-user
+    newName: nexusops0713/gamehouse
+    newTag: user-REPLACE_AT_DEPLOY
+  - name: gamehouse-post
+    newName: nexusops0713/gamehouse
+    newTag: post-REPLACE_AT_DEPLOY
+  - name: gamehouse-chat
+    newName: nexusops0713/gamehouse
+    newTag: chat-REPLACE_AT_DEPLOY
+  - name: gamehouse-match
+    newName: nexusops0713/gamehouse
+    newTag: match-REPLACE_AT_DEPLOY
+  - name: gamehouse-crew
+    newName: nexusops0713/gamehouse
+    newTag: crew-REPLACE_AT_DEPLOY
+  - name: gamehouse-riot
+    newName: nexusops0713/gamehouse
+    newTag: riot-REPLACE_AT_DEPLOY
+  # rabbitmq 는 CI 가 없다 — 미들웨어라 변경이 드물어서 손으로 빌드해 푸시한다.
+  #
+  #   docker buildx build --platform linux/amd64 \
+  #     -t nexusops0713/gamehouse:rabbitmq-3-1 --push infra/rabbitmq
+  #
+  # 그래서 여기만 REPLACE_AT_DEPLOY 가 아니라 고정 태그다. 배포 스크립트의
+  # `kustomize edit set image` 대상에서 rabbitmq 는 뺀다.
+  #
+  # 태그 규칙이 <svc>-develop / <svc>-<sha> 와 다른 이유:
+  #   - 브랜치·커밋 축이 의미가 없다. 내용을 정하는 건 베이스 이미지
+  #     (infra/rabbitmq/Dockerfile 의 FROM rabbitmq:3-management)와 플러그인 2개뿐이고,
+  #     dev·prod·local 이 같은 이미지를 쓴다.
+  #   - `3` 은 베이스 메이저. 4.x 로 올리면 rabbitmq-4-1 이 된다.
+  #   - `1` 은 우리 리비전. 플러그인·conf 를 건드리면 -2 로 올린다. 절대 덮어쓰지 않는다
+  #     — 덮어쓰면 롤백 대상이 사라지고, 노드 캐시 때문에 파드마다 내용이 갈린다.
+  #
+  # 베이스가 떠다니는 태그라 rabbitmq-1 과 rabbitmq-2 의 RabbitMQ 버전이 다를 수 있다.
+  # 푸시할 때 `docker buildx imagetools inspect rabbitmq:3-management` 의 다이제스트를
+  # 리비전과 함께 기록해 둔다.
+  - name: gamehouse-rabbitmq
+    newName: nexusops0713/gamehouse
+    newTag: rabbitmq-3-1
+
+labels:
+  - pairs:
+      app.kubernetes.io/environment: prod
+    includeSelectors: true

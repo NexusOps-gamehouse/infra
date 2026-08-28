@@ -1,0 +1,58 @@
+# AWS(EKS) 공통 구성 — dev / prod 오버레이가 둘 다 include 한다.
+#
+# 여기 들어가는 것: "EKS 위에서 돌기 위해 필요한 구조" — ALB Ingress, External Secrets,
+# PodDisruptionBudget, base 의 placeholder Secret 삭제.
+# 여기 안 들어가는 것: 환경별 "값" — ACM/IAM ARN, 도메인, replicas, Secrets Manager 경로.
+#   그건 각 오버레이의 patches/ 가 담당한다.
+#
+# 왜 오버레이 상속(overlays/dev 가 resources: ../prod)이 아니라 component 인가:
+#   상속하면 prod 의 images: 트랜스포머가 먼저 돌아 gamehouse-user·gamehouse-post 가
+#   전부 nexusops0713/gamehouse 로 바뀐 뒤에 dev 가 매칭을 시도하게 된다. 그 시점에는
+#   4개 서비스의 이미지 이름이 전부 같으므로 dev 는 서비스를 개별 지정할 수 없다.
+#   component 는 트랜스포머를 상속하지 않으므로 각 오버레이가 base 의 논리 이름
+#   (gamehouse-user 등)에 직접 매칭할 수 있다.
+#
+# 전제(이 트리 밖, 클러스터 애드온으로 미리 설치):
+#   - AWS Load Balancer Controller   (Helm)
+#   - External Secrets Operator      (Helm)
+#   - metrics-server                 (HPA 가 이걸 통해서만 사용량을 읽는다.
+#                                     EKS 기본 탑재가 아니므로 직접 설치해야 한다)
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - ingress.yaml
+  - pdb.yaml
+  - external-secrets/serviceaccount.yaml
+  - external-secrets/cluster-secret-store.yaml
+  - external-secrets/external-secret-jwt.yaml
+  - external-secrets/external-secret-rabbitmq.yaml
+  - external-secrets/external-secret-riot.yaml
+  - external-secrets/external-secret-llm.yaml
+  - external-secrets/external-secret-db-user.yaml
+  - external-secrets/external-secret-db-post.yaml
+  - external-secrets/external-secret-db-chat.yaml
+  - external-secrets/external-secret-dockerhub.yaml
+  - external-secrets/external-secret-db-match.yaml
+  - external-secrets/external-secret-db-crew.yaml
+
+patches:
+  # base 의 placeholder Secret 삭제 — ExternalSecret 이 같은 이름으로 다시 만든다.
+  - path: patches/delete-secret-jwt.yaml
+  - path: patches/delete-secret-rabbitmq.yaml
+  - path: patches/delete-secret-riot.yaml
+  - path: patches/delete-secret-llm.yaml
+  - path: patches/delete-secret-user-db.yaml
+  - path: patches/delete-secret-post-db.yaml
+  - path: patches/delete-secret-chat-db.yaml
+  - path: patches/delete-secret-match-db.yaml
+  - path: patches/delete-secret-crew-db.yaml
+
+  # 비공개 도커허브 레포 pull 자격증명을 각 ServiceAccount 에 붙인다.
+  - path: patches/imagepullsecret-user.yaml
+  - path: patches/imagepullsecret-post.yaml
+  - path: patches/imagepullsecret-chat.yaml
+  - path: patches/imagepullsecret-riot.yaml
+  - path: patches/imagepullsecret-rabbitmq.yaml
+  - path: patches/imagepullsecret-match.yaml
+  - path: patches/imagepullsecret-crew.yaml

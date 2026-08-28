@@ -1,0 +1,12 @@
+# 이 파일은 GameHouse MSA 설계 문서(디렉터리 구조 섹션 10)를 기준으로 생성되었다.
+# 실제 값(이미지 태그, 리소스 상한, 시크릿)은 overlay 에서 환경별로 덮어쓴다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - service.yaml
+  - serviceaccount.yaml
+  - networkpolicy.yaml
+  - configmap.yaml
+  - db-secret.yaml
+  - hpa.yaml

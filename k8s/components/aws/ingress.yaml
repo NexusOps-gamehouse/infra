@@ -1,0 +1,130 @@
+# EKS + AWS Load Balancer Controller(ALB). dev / prod 공통.
+# frontend 는 없다 — S3+CloudFront 가 정적 자산을 서빙하고, CloudFront가 /api·/ws 만
+# 이 ALB(오리진)로 넘긴다. 그래서 overlays/local/ingress.yaml 에 있던 "/" → frontend
+# 규칙이 여기엔 없다.
+#
+# 환경별로 오버레이가 patches/ingress.yaml 로 채우는 것:
+#   - certificate-arn  (환경별 ACM 인증서)
+#   - group.name       (환경마다 달라야 한다 — 같은 AWS 계정에서 이름이 겹치면
+#                       dev/prod 두 클러스터의 LB 컨트롤러가 ALB 하나를 서로
+#                       덮어쓴다. 서비스 5개가 ALB 를 공유하는 건 그대로다 —
+#                       서비스마다 ALB 를 새로 만들면 시간당 비용이 5배가 된다.)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gamehouse
+  namespace: gamehouse
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    # ⚠️ 오버레이가 환경별 이름으로 덮어쓴다(gamehouse-dev / gamehouse-prod).
+    alb.ingress.kubernetes.io/group.name: REPLACE_IN_OVERLAY
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}, {"HTTP":80}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    # ⚠️ 오버레이가 환경별 ACM 인증서 ARN 으로 덮어쓴다.
+    alb.ingress.kubernetes.io/certificate-arn: REPLACE_IN_OVERLAY
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
+    # target-type=ip 에서 Service 의 이름 있는 포트 `mgmt`가 각 Pod의 실제
+    # management targetPort(8181, 8182, 8183 ...)로 해석된다.
+    alb.ingress.kubernetes.io/healthcheck-port: "mgmt"
+    # chat(/ws) · crew(/ws-house) 는 WebSocket(STOMP) 이라 유휴 타임아웃을 늘린다 — 기본 60s 면 끊긴다.
+    alb.ingress.kubernetes.io/target-group-attributes: stickiness.enabled=false,deregistration_delay.timeout_seconds=30
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          - path: /api/users
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          - path: /api/friends
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          - path: /api/notifications
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          # 프로필 이미지 등 업로드 파일. user 가 파일을 소유하고 정적 리소스로 서빙한다
+          # (user/config/WebConfig 의 addResourceHandler("/uploads/**"), 인증 불필요).
+          # /api 로 시작하지 않아 눈에 잘 안 띄지만 빠뜨리면 이미지가 전부 깨진다.
+          #
+          # ⚠️ 이 규칙은 S3 로 옮기면 지운다. 임시 방편이라는 뜻이 아니라, 지금 구조가
+          #    replicas > 1 에서 이미 깨져 있다는 뜻이다 — 업로드 파일을 담는 볼륨이
+          #    없어서(PVC 도 emptyDir 도 없다) UPLOAD_DIR 기본값인 컨테이너 쓰기 레이어에
+          #    쌓인다. 그래서
+          #      - 파드마다 파일이 따로 논다. A 에 올린 이미지를 B 가 못 준다.
+          #        ALB 가 라운드로빈하므로 새로고침할 때마다 보였다 안 보였다 한다.
+          #      - 롤아웃·재시작마다 전부 사라진다. HPA 가 스케일인해도 마찬가지다.
+          #    dev 2 / prod 3 이므로 지금도 해당된다. 볼륨을 붙이는 건 해법이 아니다 —
+          #    RWO PVC 는 파드 여러 개가 못 붙고, 그러자고 replicas 를 1로 내리면
+          #    무중단 배포를 버리게 된다.
+          #
+          #    S3 + CloudFront 로 옮기면 같이 정리할 것:
+          #      1) 여기 /uploads 규칙 (dev/prod 는 CloudFront 가 S3 로 직접 보낸다)
+          #      2) overlays/local/ingress.yaml 의 같은 규칙
+          #      3) frontend/vite.config.js 의 '/uploads' 프록시
+          #      4) base/user/deployment.yaml 의 uploads emptyDir 볼륨과 마운트
+          #         (readOnlyRootFilesystem 은 이미 true 다. /tmp emptyDir 은 Tomcat
+          #          작업 디렉터리용이라 업로드와 무관하게 남는다)
+          - path: /uploads
+            pathType: Prefix
+            backend:
+              service: { name: user, port: { number: 8080 } }
+          - path: /api/posts
+            pathType: Prefix
+            backend:
+              service: { name: post, port: { number: 8080 } }
+          - path: /api/applications
+            pathType: Prefix
+            backend:
+              service: { name: post, port: { number: 8080 } }
+          # 이름과 달리 user 가 아니라 post 소유다 — PostController 의 /api/my/posts,
+          # ApplicationController 의 /api/my/applications ("내가 쓴 글/지원 내역").
+          - path: /api/my
+            pathType: Prefix
+            backend:
+              service: { name: post, port: { number: 8080 } }
+          - path: /api/chat
+            pathType: Prefix
+            backend:
+              service: { name: chat, port: { number: 8080 } }
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service: { name: chat, port: { number: 8080 } }
+          - path: /api/match
+            pathType: Prefix
+            backend:
+              service: { name: match, port: { number: 8080 } }
+          # crew — House(크루) 목록·상세·공지·일정·채팅.
+          - path: /api/crew
+            pathType: Prefix
+            backend:
+              service: { name: crew, port: { number: 8080 } }
+          # House 채팅 WebSocket(SockJS/STOMP). chat 의 /ws 와 경로를 나눈 이유는
+          # crew/config/WebSocketConfig.java 주석 참고 — 같은 /ws 면 갈라낼 수 없다.
+          - path: /ws-house
+            pathType: Prefix
+            backend:
+              service: { name: crew, port: { number: 8080 } }
+          # 아래 둘은 프론트가 아직 목 저장소를 쓰고 있어(frontend/src/mocks/houseStorage.js)
+          # 실제 호출은 없다. 그래도 미리 뚫어 둔다 — 백엔드에 이미 있는 경로라
+          # 프론트가 붙는 순간 인프라 변경 없이 바로 동작해야 하기 때문이다.
+          # ⚠️ frontend/vite.config.js 의 프록시에는 아직 없다. 프론트를 붙일 때
+          #    거기도 같이 넣어야 개발(vite)과 운영(Ingress)이 갈리지 않는다.
+          - path: /api/houses
+            pathType: Prefix
+            backend:
+              service: { name: crew, port: { number: 8080 } }
+          - path: /api/shop
+            pathType: Prefix
+            backend:
+              service: { name: crew, port: { number: 8080 } }
+          # riot 은 외부 노출 없음 — 의도적으로 경로가 없다.

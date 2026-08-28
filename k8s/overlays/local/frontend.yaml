@@ -1,0 +1,108 @@
+# local 전용 — frontend Dockerfile(node:24-alpine + serve)을 그대로 파드 하나로 띄운다.
+# prod 는 S3+CloudFront 로 정적 호스팅하므로 이 파일은 overlays/local 에만 존재한다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
+      app.kubernetes.io/managed-by: kustomize
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: frontend
+        app.kubernetes.io/managed-by: kustomize
+    spec:
+      serviceAccountName: frontend
+      containers:
+        - name: frontend
+          image: gamehouse-frontend:OVERLAY_MUST_SET
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 5173
+          env:
+            # 상대경로(/api,/ws) 로 동작 — Ingress 가 같은 오리진에서 라우팅해주므로
+            # docker-entrypoint.sh 가 config.js 를 새로 쓸 필요가 없다(entrypoint 참고).
+            - name: API_BASE_URL
+              value: ""
+            - name: WS_URL
+              value: ""
+            - name: BACKEND_ORIGIN
+              value: ""
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      securityContext:
+        fsGroup: 1000   # node:24-alpine 의 node 계정
+        seccompProfile:
+          type: RuntimeDefault
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: frontend
+  namespace: gamehouse
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  selector:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/managed-by: kustomize
+  ports:
+    - name: http
+      port: 5173
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend
+  namespace: gamehouse
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
+      app.kubernetes.io/managed-by: kustomize
+  policyTypes:
+    - Ingress
+  ingress:
+    - from: []
+      ports:
+        - protocol: TCP
+          port: 5173

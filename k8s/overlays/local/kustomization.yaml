@@ -1,0 +1,104 @@
+# local — kind 클러스터. ingress-nginx + in-cluster postgres + frontend Pod.
+# 사용법: kubectl apply -k k8s/overlays/local  (또는 scripts/k8s-local-up.sh)
+#
+# 환경 3단 중 첫 단계다: local(kind) → dev(EKS) → prod(EKS).
+# 여기서 검증되는 범위는 base/ 뿐이다 — 프로브, NetworkPolicy, 서비스 디스커버리,
+# 컨테이너 env 조립, 롤아웃. ALB·IRSA·External Secrets·RDS 는 여기 없으므로
+# overlays/dev 에서 처음 밟는다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - postgres.yaml
+  - frontend.yaml
+  - ingress.yaml
+
+patches:
+  - path: patches/configmap-user.yaml
+  - path: patches/configmap-post.yaml
+  - path: patches/configmap-chat.yaml
+  - path: patches/configmap-match.yaml
+  - path: patches/configmap-crew.yaml
+  - path: patches/configmap-riot.yaml
+  - path: patches/secret-db-user.yaml
+  - path: patches/secret-db-post.yaml
+  - path: patches/secret-db-chat.yaml
+  - path: patches/secret-db-match.yaml
+  - path: patches/secret-db-crew.yaml
+  - path: patches/secret-jwt.yaml
+  - path: patches/secret-rabbitmq.yaml
+  - path: patches/secret-riot.yaml
+  - path: patches/secret-llm.yaml
+  - path: patches/replicas-user.yaml
+  - path: patches/replicas-post.yaml
+  - path: patches/replicas-chat.yaml
+  - path: patches/replicas-match.yaml
+  - path: patches/replicas-crew.yaml
+  - path: patches/replicas-riot.yaml
+  - path: patches/hpa-user.yaml
+  - path: patches/hpa-post.yaml
+  - path: patches/hpa-chat.yaml
+  - path: patches/hpa-match.yaml
+  - path: patches/hpa-crew.yaml
+
+# 로컬 이미지는 하나의 `gamehouse` 저장소에 서비스별 태그를 붙인다
+# (`gamehouse:<service>-develop`). base 의 서비스별 논리 이름을 이 좌표로 변환한다.
+# CI 가 도커허브에 푸시하는 형태(nexusops0713/gamehouse:<svc>-<sha>)와 같은 모양이고,
+# 레지스트리 접두사만 없다.
+#
+# local 에서 특정 브랜치/커밋 이미지를 테스트하려면 여기 images: 를 추가하는 대신
+# `kustomize edit set image gamehouse-user=gamehouse:user-<tag>` 처럼 서비스별로
+# 개별 지정한다.
+#
+# 서비스 5개가 같은 레포(`gamehouse`)를 쓰는데도 개별 지정이 되는 이유는, images:
+# 트랜스포머의 매칭 키가 출력 좌표가 아니라 base 의 논리 이름(gamehouse-user 등)이기
+# 때문이다. base 에 실제 레포명을 직접 썼다면 5개가 전부 같은 이름이 되어 항목 하나가
+# 나머지를 덮어쓴다.
+
+images:
+  # local 은 로컬에서 빌드해 kind 노드에 직접 적재한 이미지를 쓴다. 레지스트리를 안 탄다.
+  #
+  #   cd backend
+  #   docker build -t gamehouse:user-develop -f user/Dockerfile .   # 컨텍스트는 backend/ 루트
+  #   kind load docker-image gamehouse:user-develop --name gamehouse-local
+  #
+  # CI 이미지(nexusops0713/gamehouse:<svc>-develop)를 쓰지 않는 이유가 둘 있다.
+  #   1. 비공개 레포라 imagePullSecrets 가 필요하다. dev/prod 는 components/aws 가
+  #      해결했지만(ExternalSecret + ServiceAccount 패치), local 은 그 트리를
+  #      include 하지 않으므로 여기엔 없다.
+  #   2. CI 가 platforms: linux/amd64 단일 빌드라 arm64 kind 노드에서는
+  #      no matching manifest for linux/arm64 로 실패한다.
+  # 둘 다 풀리면 아래 newName 을 nexusops0713/gamehouse 로 바꾸기만 하면 된다
+  # (newTag 는 이미 CI 와 같은 <svc>-develop 형태다).
+  - name: gamehouse-user
+    newName: gamehouse
+    newTag: user-develop
+  - name: gamehouse-post
+    newName: gamehouse
+    newTag: post-develop
+  - name: gamehouse-chat
+    newName: gamehouse
+    newTag: chat-develop
+  - name: gamehouse-match
+    newName: gamehouse
+    newTag: match-develop
+  - name: gamehouse-crew
+    newName: gamehouse
+    newTag: crew-develop
+  - name: gamehouse-riot
+    newName: gamehouse
+    newTag: riot-develop
+  - name: gamehouse-frontend
+    newName: gamehouse
+    newTag: frontend-develop
+  # rabbitmq 만 태그 형태가 다르다. 이 이미지는 브랜치를 따라가지 않고 리비전으로
+  # 굴리기 때문이다(dev/prod 오버레이 주석 참고). local 도 같은 이름을 쓴다.
+  - name: gamehouse-rabbitmq
+    newName: gamehouse
+    newTag: rabbitmq-3-1
+
+labels:
+  - pairs:
+      app.kubernetes.io/environment: local
+    includeSelectors: true

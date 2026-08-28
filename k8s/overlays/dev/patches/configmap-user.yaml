@@ -1,0 +1,9 @@
+# ⚠️ CHANGE_ME: 실제 dev 도메인(CloudFront 배포 주소).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-config
+  namespace: gamehouse
+data:
+  ENV_NAME: "dev"
+  CORS_ALLOWED_ORIGINS: "https://dev.gamehouse.example.com"

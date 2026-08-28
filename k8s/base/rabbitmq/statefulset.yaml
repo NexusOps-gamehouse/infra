@@ -1,0 +1,96 @@
+# RabbitMQ — 두 가지 용도로 쓰인다.
+#   1) AMQP(5672)   — 서비스 간 도메인 이벤트 버스 (common/event/* 계약 클래스)
+#   2) STOMP(61613) — chat 서비스의 브라우저 WebSocket STOMP 릴레이
+# 이미지는 infra/rabbitmq/Dockerfile (rabbitmq:3-management + stomp/prometheus 플러그인)을
+# 그대로 쓴다 — CI 가 빌드해서 내부 레지스트리에 push 한다고 가정.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: rabbitmq
+spec:
+  serviceName: rabbitmq-headless
+  replicas: 1
+  # ⚠️ 단일 인스턴스다. 큐 유실 없이 HA 를 하려면 RabbitMQ 클러스터(Operator) +
+  # quorum queue 전환이 필요한데, 현재 스케일에서는 과설계라 보류한다.
+  # 운영 중 병목/장애가 관찰되면 그때 RabbitMQ Cluster Operator 도입을 검토한다.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rabbitmq
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "15692"
+    spec:
+      serviceAccountName: rabbitmq
+      containers:
+        - name: rabbitmq
+          # 논리 이름이다. 레지스트리 좌표가 아니다 — overlays 의 images: 가 실제 주소로 바꾼다.
+          image: gamehouse-rabbitmq:OVERLAY_MUST_SET
+          ports:
+            - name: amqp
+              containerPort: 5672
+            - name: stomp
+              containerPort: 61613
+            - name: management
+              containerPort: 15672
+            - name: metrics
+              containerPort: 15692
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: RABBITMQ_USERNAME
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: RABBITMQ_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+          resources:
+            requests:
+              cpu: "150m"
+              memory: "384Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            # rabbitmq-diagnostics 는 Erlang VM 을 띄워 노드에 붙는다.
+            # 기본 timeoutSeconds(1초)로는 항상 타임아웃난다.
+            timeoutSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      securityContext:
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi

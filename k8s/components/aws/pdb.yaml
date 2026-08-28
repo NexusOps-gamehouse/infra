@@ -1,0 +1,70 @@
+# 노드 드레인(EKS 관리형 노드그룹 업그레이드 등) 중에도 서비스당 최소 1개는 떠 있게 한다.
+# dev(1노드 kind)에서는 minAvailable 을 만족 못 해 드레인이 막힐 수 있어 prod 에만 둔다.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: user
+  namespace: gamehouse
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: user
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: post
+  namespace: gamehouse
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: post
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: chat
+  namespace: gamehouse
+spec:
+  minAvailable: 2   # WebSocket — 한 번에 너무 많이 빠지면 재접속이 몰린다
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: chat
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: match
+  namespace: gamehouse
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: match
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: crew
+  namespace: gamehouse
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crew
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: riot
+  namespace: gamehouse
+spec:
+  # riot 은 replicas 1 고정이라 minAvailable: 1 로 두면 그 한 개를 영영 못 비워
+  # 노드 드레인이 무한 대기한다(관리형 노드그룹 업그레이드가 멈춘다).
+  # 어차피 1벌이라 무중단이 불가능하므로 드레인을 막지 않는 쪽을 택한다.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: riot

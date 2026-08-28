@@ -1,0 +1,43 @@
+# 이 파일은 GameHouse MSA 설계 문서(디렉터리 구조 섹션 10)를 기준으로 생성되었다.
+# 실제 값(이미지 태그, 리소스 상한, 시크릿)은 overlay 에서 환경별로 덮어쓴다.
+#
+# 파드를 늘려도 되는 이유는 House 채팅이 RabbitMQ STOMP 릴레이를 쓰기 때문이다
+# (crew/config/WebSocketConfig.java 의 enableStompBrokerRelay("/topic")).
+# 인메모리 브로커(enableSimpleBroker)로 되돌리면 파드가 2개가 되는 순간 같은 House 의
+# 두 사람이 서로 다른 브로커에 붙어 실시간 전달이 갈라진다. 메시지는
+# HouseChatService.save 가 DB 에 넣으므로 새로고침하면 보이지만, 화면상으로는 대화가
+# 끊긴 것으로 보인다. sticky session 으로는 못 고친다 — 스티키는 한 클라이언트를 한
+# 파드에 붙일 뿐이고, 깨지는 건 클라이언트 사이의 전달이다.
+#
+# 릴레이를 받치는 k8s 배선 3개 — 하나라도 빠지면 파드는 뜨는데 채팅만 조용히 죽는다:
+#   - base/crew/deployment.yaml 의 RABBITMQ_STOMP_PORT
+#   - base/crew/networkpolicy.yaml 의 rabbitmq egress 61613
+#   - base/rabbitmq/networkpolicy.yaml 의 61613 ingress 에 crew
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: crew
+  namespace: gamehouse
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: crew
+  minReplicas: 2
+  maxReplicas: 6
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300   # WebSocket 연결이 끊기지 않도록 스케일다운을 천천히
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
