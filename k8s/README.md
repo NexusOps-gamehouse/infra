@@ -37,7 +37,7 @@ cd ../frontend
 docker build -t gamehouse:frontend-develop .
 
 cd ../infra/rabbitmq
-docker build -t gamehouse:rabbitmq-develop .
+docker build -t gamehouse:rabbitmq-3-1 .
 ```
 
 ### 이미지 build — 서비스별 레포
@@ -127,9 +127,12 @@ cd infra
 수동으로 이미지를 적재해야 하는 경우:
 
 ```bash
-for svc in user post chat riot match frontend rabbitmq; do
+for svc in user post chat riot match frontend; do
   kind load docker-image gamehouse:$svc-develop --name gamehouse-local
 done
+
+# rabbitmq 만 태그 형태가 다르다 — 브랜치가 아니라 리비전으로 굴린다
+kind load docker-image gamehouse:rabbitmq-3-1 --name gamehouse-local
 ```
 
 ### 외부 API 키

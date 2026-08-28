@@ -119,12 +119,28 @@ images:
   - name: gamehouse-riot
     newName: nexusops0713/gamehouse
     newTag: riot-REPLACE_AT_DEPLOY
-  # ⚠️ rabbitmq 는 이미지를 푸시하는 CI 가 아직 없다. infra 의 ci-cd.yml 은
-  #    docker-compose 검증만 하고, compose 는 rabbitmq 를 build: 로 로컬 빌드한다.
-  #    EKS 에 올리려면 infra CI 에 build-push 잡을 추가해야 한다.
+  # rabbitmq 는 CI 가 없다 — 미들웨어라 변경이 드물어서 손으로 빌드해 푸시한다.
+  #
+  #   docker buildx build --platform linux/amd64 \
+  #     -t nexusops0713/gamehouse:rabbitmq-3-1 --push infra/rabbitmq
+  #
+  # 그래서 여기만 REPLACE_AT_DEPLOY 가 아니라 고정 태그다. 배포 스크립트의
+  # `kustomize edit set image` 대상에서 rabbitmq 는 뺀다.
+  #
+  # 태그 규칙이 <svc>-develop / <svc>-<sha> 와 다른 이유:
+  #   - 브랜치·커밋 축이 의미가 없다. 내용을 정하는 건 베이스 이미지
+  #     (infra/rabbitmq/Dockerfile 의 FROM rabbitmq:3-management)와 플러그인 2개뿐이고,
+  #     dev·prod·local 이 같은 이미지를 쓴다.
+  #   - `3` 은 베이스 메이저. 4.x 로 올리면 rabbitmq-4-1 이 된다.
+  #   - `1` 은 우리 리비전. 플러그인·conf 를 건드리면 -2 로 올린다. 절대 덮어쓰지 않는다
+  #     — 덮어쓰면 롤백 대상이 사라지고, 노드 캐시 때문에 파드마다 내용이 갈린다.
+  #
+  # 베이스가 떠다니는 태그라 rabbitmq-1 과 rabbitmq-2 의 RabbitMQ 버전이 다를 수 있다.
+  # 푸시할 때 `docker buildx imagetools inspect rabbitmq:3-management` 의 다이제스트를
+  # 리비전과 함께 기록해 둔다.
   - name: gamehouse-rabbitmq
     newName: nexusops0713/gamehouse
-    newTag: rabbitmq-REPLACE_AT_DEPLOY
+    newTag: rabbitmq-3-1
 
 labels:
   - pairs:

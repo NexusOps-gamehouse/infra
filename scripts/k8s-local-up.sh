@@ -49,12 +49,17 @@ echo "[4/7] 로컬 이미지 적재..."
 # overlays/local 은 레지스트리를 타지 않는다 — 호스트에서 빌드한 이미지를 노드에
 # 직접 넣어야 파드가 뜬다. 여기서 안 넣고 apply 하면 [7/7] 이 ErrImageNeverPull 인
 # 파드를 서비스마다 180초씩 기다리다 만다.
+#
+# rabbitmq 만 태그가 <svc>-develop 형태가 아니다. 브랜치를 따라가지 않고 리비전으로
+# 굴리기 때문이다(k8s/overlays/local/kustomization.yaml 주석 참고). 그래서 서비스
+# 이름이 아니라 태그 전체를 나열한다 — overlays/local 의 newTag 와 반드시 같아야 한다.
 MISSING=()
-for img in user post chat riot match frontend rabbitmq; do
-  if docker image inspect "gamehouse:${img}-develop" >/dev/null 2>&1; then
-    kind load docker-image "gamehouse:${img}-develop" --name "${CLUSTER_NAME}"
+for tag in user-develop post-develop chat-develop riot-develop match-develop \
+           frontend-develop rabbitmq-3-1; do
+  if docker image inspect "gamehouse:${tag}" >/dev/null 2>&1; then
+    kind load docker-image "gamehouse:${tag}" --name "${CLUSTER_NAME}"
   else
-    MISSING+=("gamehouse:${img}-develop")
+    MISSING+=("gamehouse:${tag}")
   fi
 done
 if [ ${#MISSING[@]} -gt 0 ]; then

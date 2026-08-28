@@ -89,9 +89,11 @@ images:
   - name: gamehouse-frontend
     newName: gamehouse
     newTag: frontend-develop
+  # rabbitmq 만 태그 형태가 다르다. 이 이미지는 브랜치를 따라가지 않고 리비전으로
+  # 굴리기 때문이다(dev/prod 오버레이 주석 참고). local 도 같은 이름을 쓴다.
   - name: gamehouse-rabbitmq
     newName: gamehouse
-    newTag: rabbitmq-develop
+    newTag: rabbitmq-3-1
 
 labels:
   - pairs:
