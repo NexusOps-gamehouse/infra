@@ -1,0 +1,16 @@
+# 저메모리 오버라이드 — Loki
+#   helm upgrade --install loki grafana/loki -n observability \
+#     -f loki.local.yaml -f loki.lowmem.local.yaml
+loki:
+  limits_config:
+    retention_period: 12h
+    ingestion_rate_mb: 4
+    ingestion_burst_size_mb: 8
+    max_label_names_per_series: 15
+
+singleBinary:
+  persistence:
+    size: 2Gi
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits:   { memory: 448Mi }

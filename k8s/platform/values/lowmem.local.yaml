@@ -1,0 +1,60 @@
+# ---------------------------------------------------------------------------
+# 저메모리 오버라이드 — Docker Desktop 이 8GiB 미만일 때
+#
+# 기존 values 위에 겹쳐 쓴다 (뒤에 오는 -f 가 이긴다):
+#   helm upgrade --install kps prometheus-community/kube-prometheus-stack \
+#     -n observability \
+#     -f kube-prometheus-stack.local.yaml \
+#     -f lowmem.local.yaml
+#
+# 이걸 쓰면 관측 스택이 약 2.5GiB → 1.3GiB 로 줄어든다.
+# 관측 자체의 정확도는 안 떨어진다. 보관 기간과 여유 버퍼만 줄인 것이다.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Alertmanager 를 끈다 — 가장 큰 절약이고 지금은 손실이 없다
+#
+# Phase 2 에서는 알람 규칙을 아직 안 옮겼다. 옮길 게 없으니 띄울 이유도 없다.
+# 기존 알람 7개를 PrometheusRule 로 이관할 때 다시 켠다.
+#
+# ⚠️ 끈 상태에서도 PrometheusRule 은 평가된다. Prometheus UI 의 Alerts 탭에서
+#    firing 여부를 볼 수 있다. 통보만 안 나갈 뿐이다. 로컬에선 그걸로 충분하다.
+# ---------------------------------------------------------------------------
+alertmanager:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    # 하루치도 로컬에선 과하다. 반나절이면 그래프 확인에 충분하다.
+    retention: 12h
+    retentionSize: 1GB
+    resources:
+      requests: { cpu: 100m, memory: 384Mi }
+      limits:   { memory: 768Mi }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+
+grafana:
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits:   { memory: 640Mi }     # 384Mi 는 OOMKilled 발생 — 2026-08 실측
+
+prometheusOperator:
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits:   { memory: 192Mi }
+
+kube-state-metrics:
+  resources:
+    requests: { cpu: 20m, memory: 48Mi }
+    limits:   { memory: 96Mi }
+
+nodeExporter:
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits:   { memory: 64Mi }

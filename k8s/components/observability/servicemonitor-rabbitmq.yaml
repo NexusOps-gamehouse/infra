@@ -1,0 +1,24 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rabbitmq
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/part-of: gamehouse
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  endpoints:
+    - port: metrics                  # 15692, rabbitmq_prometheus 플러그인
+      path: /metrics                 # 앱과 달리 기본 경로
+      interval: 30s
+      relabelings:
+        # ⚠️ rabbitmq 와 rabbitmq-headless 가 같은 라벨을 갖고 있어서
+        #    selector 로는 구분이 안 된다. 그대로 두면 같은 파드를 두 번 긁고,
+        #    대시보드의 sum(rabbitmq_queue_messages_ready) 가 2배로 나온다.
+        #    헤드리스는 StatefulSet 의 파드 DNS 용이지 수집 대상이 아니므로 버린다.
+        - sourceLabels: [__meta_kubernetes_service_name]
+          regex: rabbitmq-headless
+          action: drop

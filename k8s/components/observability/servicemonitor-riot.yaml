@@ -1,0 +1,20 @@
+# Prometheus 가 riot 를 찾아가는 방법.
+# 기존 prometheus.yml 의 static_configs 를 대체하는 것이다 —
+# 서비스가 늘어도 수집기 설정 파일을 고칠 필요가 없다.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: riot
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: riot
+    app.kubernetes.io/part-of: gamehouse
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: riot     # Service 의 라벨과 정확히 일치해야 한다
+  endpoints:
+    - port: mgmt                     # Service 의 포트 '이름'. 숫자를 쓰면 안 된다
+      path: /actuator/prometheus     # Actuator 기본값. /metrics 아님
+      interval: 30s                  # 기존 EC2 구성과 동일 — rate() 창 계산이 그대로 유효
+      metricRelabelings: []          # 카디널리티가 늘면 여기에 drop 규칙

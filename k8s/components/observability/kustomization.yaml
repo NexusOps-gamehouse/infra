@@ -1,0 +1,21 @@
+# 관측 배선 Component.
+#
+# components/aws 와 같은 패턴이다. base 는 건드리지 않고 overlay 에서 골라 붙인다.
+#
+# ⚠️ base 가 아니라 component 로 둔 이유:
+#    ServiceMonitor 는 Prometheus Operator 의 CRD 다. 그 CRD 가 없는 클러스터에
+#    apply 하면 "no matches for kind ServiceMonitor" 로 통째로 실패한다.
+#    dev/prod EKS 에 kube-prometheus-stack 을 아직 안 깔았다면 거기서 터진다.
+#    그래서 관측 스택이 있는 환경의 overlay 만 이 component 를 포함한다.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - servicemonitor-user.yaml
+  - servicemonitor-post.yaml
+  - servicemonitor-chat.yaml
+  - servicemonitor-match.yaml
+  - servicemonitor-riot.yaml
+  - servicemonitor-rabbitmq.yaml
+  # crew 는 base/kustomization.yaml 에서 빠져 있으므로 여기도 없다.
+  # 배포 대상에 들어오면 servicemonitor-crew.yaml 을 만들어 추가한다.

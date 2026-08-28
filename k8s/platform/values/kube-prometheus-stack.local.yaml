@@ -1,0 +1,113 @@
+# ---------------------------------------------------------------------------
+# kube-prometheus-stack — kind (gamehouse-local) 용
+#
+# 이 차트 하나에 다섯이 들어 있다:
+#   Prometheus · Grafana · Alertmanager · node-exporter · kube-state-metrics
+#
+# ⚠️ 기존 metrics-server 와 충돌하지 않는다. 역할이 다르다.
+#      metrics-server  HPA 용 실시간 값. 저장 안 함
+#      Prometheus      시계열 저장. 그래프와 알람의 근거
+# ---------------------------------------------------------------------------
+fullnameOverride: kps
+
+prometheus:
+  prometheusSpec:
+    # -----------------------------------------------------------------
+    # ⭐ 이 네 줄이 없으면 우리가 Kustomize 로 만든 ServiceMonitor 를
+    #    Prometheus 가 영원히 못 찾는다. 에러도 안 난다 — Targets 가 그냥 빈다.
+    #    로컬에서 가장 많이 막히는 지점이다.
+    # -----------------------------------------------------------------
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+
+    # 기존 EC2 구성과 동일. 대시보드 쿼리의 rate() 창 계산이 그대로 유효해진다.
+    scrapeInterval: 30s
+
+    retention: 24h
+    retentionSize: 2GB
+
+    resources:
+      requests: { cpu: 100m, memory: 512Mi }
+      limits:   { memory: 1Gi }
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+grafana:
+  adminPassword: admin        # 로컬 전용
+
+  # -----------------------------------------------------------------
+  # kind 에는 NodePort 가 호스트로 안 뚫린다 (extraPortMappings 가 필요).
+  # 클러스터 설정을 건드리지 않으려고 ClusterIP + port-forward 로 간다.
+  #
+  # ingress-nginx 가 이미 있으니 Ingress 로 열고 싶다면:
+  #   echo "127.0.0.1 grafana.gamehouse.local" | sudo tee -a /etc/hosts
+  # 하고 아래 ingress 블록의 enabled 를 true 로 바꾼다.
+  # -----------------------------------------------------------------
+  service:
+    type: ClusterIP
+
+  ingress:
+    enabled: false
+    ingressClassName: nginx
+    hosts:
+      - grafana.gamehouse.local
+    path: /
+    pathType: Prefix
+
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: ALL
+      label: grafana_dashboard
+    datasources:
+      enabled: true
+      searchNamespace: ALL
+
+  # Loki 를 미리 등록해둔다. 없으면 Explore 에서 로그를 못 본다.
+  # ⚠️ url 의 서비스 이름은 설치 후 확인할 것:
+  #      kubectl get svc -n observability | grep loki
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      access: proxy
+      url: http://loki.observability.svc.cluster.local:3100
+      jsonData:
+        maxLines: 1000
+
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits:   { memory: 512Mi }
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 25m, memory: 128Mi }
+      limits:   { memory: 256Mi }
+
+# ---------------------------------------------------------------------------
+# ⭐ kind 에서 반드시 꺼야 하는 넷
+#
+# kind 는 kubeadm 기반이라 이 컨트롤 플레인 컴포넌트들이 127.0.0.1 에만
+# 바인딩된다. Prometheus 가 못 긁고 Targets 에 빨간 DOWN 이 넷 남는다.
+#
+# 그대로 두면 "up 에 빨간 게 있는 게 정상"이라는 습관이 생기고,
+# 진짜 장애 때 구분을 못 하게 된다. 로컬에서는 끄는 것이 맞다.
+# (dev/prod overlay 에서는 EKS 관리형이라 애초에 안 보인다)
+# ---------------------------------------------------------------------------
+kubeEtcd:            { enabled: false }
+kubeControllerManager: { enabled: false }
+kubeScheduler:       { enabled: false }
+kubeProxy:           { enabled: false }
+
+nodeExporter:        { enabled: true }
+kube-state-metrics:  { enabled: true }
