@@ -70,8 +70,9 @@ spec:
           #      1) 여기 /uploads 규칙 (dev/prod 는 CloudFront 가 S3 로 직접 보낸다)
           #      2) overlays/local/ingress.yaml 의 같은 규칙
           #      3) frontend/vite.config.js 의 '/uploads' 프록시
-          #      4) base/{user,post}/deployment.yaml 의 readOnlyRootFilesystem: false
-          #         (업로드가 빠지면 임시파일만 남아 true 로 되돌릴 수 있는지 재검토)
+          #      4) base/user/deployment.yaml 의 uploads emptyDir 볼륨과 마운트
+          #         (readOnlyRootFilesystem 은 이미 true 다. /tmp emptyDir 은 Tomcat
+          #          작업 디렉터리용이라 업로드와 무관하게 남는다)
           - path: /uploads
             pathType: Prefix
             backend:
