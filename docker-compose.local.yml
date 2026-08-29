@@ -1,19 +1,59 @@
 services:
-
-  backend:
+  user:
     pull_policy: never
-
     environment:
-      DB_URL: jdbc:postgresql://${LOCAL_DB_HOST}:${LOCAL_DB_PORT}/${LOCAL_DB_NAME}
-      DB_USERNAME: ${LOCAL_DB_USERNAME}
-      DB_PASSWORD: ${LOCAL_DB_PASSWORD}
-
+      DB_URL: jdbc:postgresql://${LOCAL_DB_HOST}:${LOCAL_DB_PORT}/${LOCAL_DB_NAME}?currentSchema=user_svc
+      USER_DB_USERNAME: ${LOCAL_DB_USERNAME}
+      USER_DB_PASSWORD: ${LOCAL_DB_PASSWORD}
     depends_on:
-      rabbitmq:
-        condition: service_healthy
       postgres:
         condition: service_healthy
 
+  post:
+    pull_policy: never
+    environment:
+      DB_URL: jdbc:postgresql://${LOCAL_DB_HOST}:${LOCAL_DB_PORT}/${LOCAL_DB_NAME}?currentSchema=post_svc
+      POST_DB_USERNAME: ${LOCAL_DB_USERNAME}
+      POST_DB_PASSWORD: ${LOCAL_DB_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  chat:
+    pull_policy: never
+    environment:
+      DB_URL: jdbc:postgresql://${LOCAL_DB_HOST}:${LOCAL_DB_PORT}/${LOCAL_DB_NAME}?currentSchema=chat_svc
+      CHAT_DB_USERNAME: ${LOCAL_DB_USERNAME}
+      CHAT_DB_PASSWORD: ${LOCAL_DB_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  match:
+    pull_policy: never
+    environment:
+      DB_URL: jdbc:postgresql://${LOCAL_DB_HOST}:${LOCAL_DB_PORT}/${LOCAL_DB_NAME}?currentSchema=match_svc
+      MATCH_DB_USERNAME: ${LOCAL_DB_USERNAME}
+      MATCH_DB_PASSWORD: ${LOCAL_DB_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  crew:
+    pull_policy: never
+    environment:
+      DB_URL: jdbc:postgresql://${LOCAL_DB_HOST}:${LOCAL_DB_PORT}/${LOCAL_DB_NAME}?currentSchema=crew_svc
+      CREW_DB_USERNAME: ${LOCAL_DB_USERNAME}
+      CREW_DB_PASSWORD: ${LOCAL_DB_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  riot:
+    pull_policy: never
+
+  frontend:
+    pull_policy: never
 
   # 로컬 개발용 포트 공개.
   #
@@ -34,10 +74,6 @@ services:
       - "5672:5672"     # AMQP  — 서비스 간 이벤트 (post ↔ chat ↔ user)
       - "61613:61613"   # STOMP — 채팅 메시지 릴레이 (브라우저 ↔ chat)
       - "15672:15672"   # 관리 UI (http://localhost:15672)
-
-
-  frontend:
-    pull_policy: never
 
 
   postgres:
