@@ -22,8 +22,256 @@ services:
       retries: 5
       start_period: 20s
 
+  user:
+    build:
+      context: ../backend
+      dockerfile: user/Dockerfile
+    image: nexusops0713/gamehouse:user-${BACKEND_VERSION:-develop}
+    platform: linux/amd64
+    pull_policy: always
+    mem_limit: 700m
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      riot:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8081
+      DB_URL: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=user_svc
+      USER_DB_USERNAME: ${DB_USERNAME:-duo}
+      USER_DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      UPLOAD_DIR: /app/uploads
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_AMQP_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-appuser}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      USER_SERVICE_URL: http://user:8081
+      POST_SERVICE_URL: http://post:8082
+      CHAT_SERVICE_URL: http://chat:8083
+      RIOT_SERVICE_URL: http://riot:8084
+      MATCH_SERVICE_URL: http://match:8085
+    volumes:
+      - backend-uploads:/app/uploads
+    networks:
+      - frontend-net
+      - backend-net
+    ports:
+      - "8081:8081"
+      - "127.0.0.1:8181:8181"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8081"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  post:
+    build:
+      context: ../backend
+      dockerfile: post/Dockerfile
+    image: nexusops0713/gamehouse:post-${BACKEND_VERSION:-develop}
+    platform: linux/amd64
+    pull_policy: always
+    mem_limit: 700m
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8082
+      DB_URL: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=post_svc
+      POST_DB_USERNAME: ${DB_USERNAME:-duo}
+      POST_DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_AMQP_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-appuser}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      USER_SERVICE_URL: http://user:8081
+      POST_SERVICE_URL: http://post:8082
+      CHAT_SERVICE_URL: http://chat:8083
+      RIOT_SERVICE_URL: http://riot:8084
+      MATCH_SERVICE_URL: http://match:8085
+    networks:
+      - frontend-net
+      - backend-net
+    ports:
+      - "8082:8082"
+      - "127.0.0.1:8182:8182"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8082"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  chat:
+    build:
+      context: ../backend
+      dockerfile: chat/Dockerfile
+    image: nexusops0713/gamehouse:chat-${BACKEND_VERSION:-develop}
+    platform: linux/amd64
+    pull_policy: always
+    mem_limit: 700m
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8083
+      DB_URL: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=chat_svc
+      CHAT_DB_USERNAME: ${DB_USERNAME:-duo}
+      CHAT_DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_AMQP_PORT: 5672
+      RABBITMQ_STOMP_PORT: 61613
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-appuser}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      USER_SERVICE_URL: http://user:8081
+      POST_SERVICE_URL: http://post:8082
+      CHAT_SERVICE_URL: http://chat:8083
+      RIOT_SERVICE_URL: http://riot:8084
+      MATCH_SERVICE_URL: http://match:8085
+    networks:
+      - frontend-net
+      - backend-net
+    ports:
+      - "8083:8083"
+      - "127.0.0.1:8183:8183"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8083"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  riot:
+    build:
+      context: ../backend
+      dockerfile: riot/Dockerfile
+    image: nexusops0713/gamehouse:riot-${BACKEND_VERSION:-develop}
+    platform: linux/amd64
+    pull_policy: always
+    mem_limit: 700m
+    environment:
+      SERVER_PORT: 8084
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      RIOT_API_KEY: ${RIOT_API_KEY:-dummy_key}
+      USER_SERVICE_URL: http://user:8081
+      POST_SERVICE_URL: http://post:8082
+      CHAT_SERVICE_URL: http://chat:8083
+      RIOT_SERVICE_URL: http://riot:8084
+      MATCH_SERVICE_URL: http://match:8085
+    networks:
+      - frontend-net
+      - backend-net
+    ports:
+      - "8084:8084"
+      - "127.0.0.1:8184:8184"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8084"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  match:
+    build:
+      context: ../backend
+      dockerfile: match/Dockerfile
+    image: nexusops0713/gamehouse:match-${BACKEND_VERSION:-develop}
+    platform: linux/amd64
+    pull_policy: always
+    mem_limit: 700m
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8085
+      DB_URL: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=match_svc
+      MATCH_DB_USERNAME: ${DB_USERNAME:-duo}
+      MATCH_DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      LLM_API_KEY: ${LLM_API_KEY:-dummy_key}
+      LLM_API_URL: ${LLM_API_URL:-https://api.openai.com/v1/chat/completions}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_AMQP_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-appuser}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      USER_SERVICE_URL: http://user:8081
+      POST_SERVICE_URL: http://post:8082
+      CHAT_SERVICE_URL: http://chat:8083
+      RIOT_SERVICE_URL: http://riot:8084
+      MATCH_SERVICE_URL: http://match:8085
+    networks:
+      - frontend-net
+      - backend-net
+    ports:
+      - "8085:8085"
+      - "127.0.0.1:8185:8185"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8085"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  crew:
+    build:
+      context: ../backend
+      dockerfile: crew/Dockerfile
+    image: nexusops0713/gamehouse:crew-${BACKEND_VERSION:-develop}
+    platform: linux/amd64
+    pull_policy: always
+    mem_limit: 700m
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8086
+      DB_URL: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=crew_svc
+      CREW_DB_USERNAME: ${DB_USERNAME:-duo}
+      CREW_DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_AMQP_PORT: 5672
+      RABBITMQ_STOMP_PORT: 61613
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-appuser}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      USER_SERVICE_URL: http://user:8081
+      POST_SERVICE_URL: http://post:8082
+      CHAT_SERVICE_URL: http://chat:8083
+      RIOT_SERVICE_URL: http://riot:8084
+      MATCH_SERVICE_URL: http://match:8085
+      CREW_SERVICE_URL: http://crew:8086
+    networks:
+      - frontend-net
+      - backend-net
+    ports:
+      - "8086:8086"
+      - "127.0.0.1:8186:8186"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8086"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
   backend:
-    build: ../backend
+    profiles: ["legacy"]
     image: nexusops0713/gamehouse:backend-${BACKEND_VERSION:-develop}
     # CI가 linux/amd64로만 빌드한다. Apple Silicon(arm64) 맥에서
     # 이 지정이 없으면 `no matching manifest for linux/arm64/v8` 로 실패한다.
@@ -103,7 +351,15 @@ services:
     pull_policy: always
     container_name: gamehouse-frontend
     depends_on:
-      backend:
+      user:
+        condition: service_healthy
+      post:
+        condition: service_healthy
+      chat:
+        condition: service_healthy
+      match:
+        condition: service_healthy
+      crew:
         condition: service_healthy
     # 런타임 주입 → entrypoint 가 dist/config.js 생성.
     # 기본값은 "비움" = 상대경로(/api,/ws) = ALB same-origin. 운영에서 env 를 안 줘도 안전한 값.
