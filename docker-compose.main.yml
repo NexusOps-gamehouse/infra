@@ -70,6 +70,9 @@ services:
       CHAT_SERVICE_URL: http://chat:8083
       RIOT_SERVICE_URL: http://riot:8084
 
+      AWS_REGION: ${AWS_REGION}
+      PROFILE_IMAGE_BUCKET: ${PROFILE_IMAGE_BUCKET}
+
     volumes:
       - backend-uploads:/app/uploads
 
