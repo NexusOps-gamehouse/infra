@@ -103,8 +103,8 @@ images:
   # 레포 하나를 태그 접두사로 공유하기 때문이다. base 에 실제 레포명을 쓰면 매칭 이름이
   # 6개 다 같아져 서비스 하나만 골라 태그를 바꿀 수 없다(prod 오버레이 주석 참고).
   - name: gamehouse-user
-    newName: nexusops0713/gamehouse
-    newTag: user-REPLACE_AT_DEPLOY
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-user
+    newTag: develop
   - name: gamehouse-post
     newName: nexusops0713/gamehouse
     newTag: post-REPLACE_AT_DEPLOY
@@ -112,14 +112,14 @@ images:
     newName: nexusops0713/gamehouse
     newTag: chat-REPLACE_AT_DEPLOY
   - name: gamehouse-match
-    newName: nexusops0713/gamehouse
-    newTag: match-REPLACE_AT_DEPLOY
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-match
+    newTag: develop
   - name: gamehouse-crew
     newName: nexusops0713/gamehouse
     newTag: crew-REPLACE_AT_DEPLOY
   - name: gamehouse-riot
-    newName: nexusops0713/gamehouse
-    newTag: riot-REPLACE_AT_DEPLOY
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-riot
+    newTag: develop
   # rabbitmq 는 CI 가 없다 — 미들웨어라 변경이 드물어서 손으로 빌드해 푸시한다.
   #
   #   docker buildx build --platform linux/amd64 \
