@@ -30,9 +30,49 @@ spec:
     server: https://kubernetes.default.svc
     namespace: gamehouse
 
-  # syncPolicy 를 비워 둔다 — 자동 sync 는 정책을 정한 뒤에 켠다.
-  # 지금은 Argo CD 가 무엇을 다르다고 보는지 먼저 눈으로 확인하는 단계다.
-  syncPolicy: {}
+  syncPolicy:
+    automated:
+      # 손으로 바꾼 것을 되돌린다. drift 교정이 Argo CD 를 쓰는 이유 중 하나다.
+      selfHeal: true
+
+      # prune 은 켜지 않는다. git 에서 리소스를 지운 커밋이 곧 클러스터 삭제가 되는데,
+      # 지금은 그런 변경이 없고 방어선도 PR 리뷰 하나뿐이다. 필요해지면 그때 켠다.
+      prune: false
+
+    syncOptions:
+      # ⭐ ignoreDifferences 만으로는 '상태 표시'에서만 무시된다. 이걸 켜야 sync 시점에도
+      #    그 필드를 건드리지 않는다. 이게 빠지면 다른 서비스의 배포 커밋이 들어올 때
+      #    replicas 가 함께 실려 부하 중에 파드가 줄어든다.
+      - RespectIgnoreDifferences=true
+
+  # ---------------------------------------------------------------------------
+  # Argo CD 가 소유하지 않을 필드
+  # ---------------------------------------------------------------------------
+  ignoreDifferences:
+    # HPA 가 관리하는 필드다. overlay 에 replicas-*.yaml 과 hpa-*.yaml 이 둘 다 있어
+    # 같은 필드를 Argo CD 와 HPA 가 동시에 관리하는 구조가 원인이다.
+    #
+    # name 을 지정하지 않아 **모든 Deployment 에 적용된다.** 서비스가 늘어도 규칙을
+    # 추가할 필요가 없고, 한 서비스에서 검증하면 나머지도 같은 규칙을 탄다.
+    # ⚠️ dev/prod 에도 그대로 옮겨야 한다. 원인이 매니페스트 구조라 클러스터와 무관하다.
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+
+    # 로컬 전용 — k8s-local-secrets.sh 가 주입한 외부 API 키를 지키기 위해서다.
+    # overlay 의 Secret 이 더미라, 이 예외가 없으면 sync 때마다 dummy_key 로 덮인다.
+    #
+    # dev/prod 에는 이 항목이 없어야 한다. 거기서는 components/aws 가 평문 Secret 을
+    # 지우고 External Secrets 가 만들므로 Argo CD 가 이 Secret 을 애초에 소유하지 않는다.
+    - kind: Secret
+      name: riot-secret
+      jsonPointers:
+        - /data
+    - kind: Secret
+      name: match-llm-secret
+      jsonPointers:
+        - /data
 
 # ---------------------------------------------------------------------------
 # 최초 연결에서 관찰한 것 (2026-09-01, 차트 10.5.0 / Argo CD v3.5.2)
