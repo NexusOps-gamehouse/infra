@@ -1,0 +1,167 @@
+# postgres-exporter — "DB 에서 본 시야".
+#
+# 앱의 HikariCP 지표(앱 시야)와 대조하기 위한 것이다. 둘을 나란히 봐야
+# 커넥션 대기의 원인이 갈린다.
+#   대기 높음 + DB 연결 수 낮음  → 풀이 작다 (maximum-pool-size 확대)
+#   대기 높음 + DB 연결 수 최대  → DB 가 한계 (쿼리 튜닝 / 인스턴스 확대)
+# 이 구분이 없으면 풀만 늘리면 될 일에 RDS 인스턴스를 키우게 된다.
+#
+# ⚠️ 접속 대상이 환경마다 다르다. local 은 in-cluster postgres 파드,
+#    dev/prod 는 RDS 다. overlay 에서 덮어쓰는 지점은 세 곳뿐이다 —
+#    PGHOST, PGSSLMODE, 그리고 secretKeyRef 의 name.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: postgres-exporter
+    app.kubernetes.io/part-of: gamehouse
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres-exporter
+        app.kubernetes.io/part-of: gamehouse
+    spec:
+      containers:
+        - name: postgres-exporter
+          # 기존 EC2 스택과 같은 버전이다. 올리면 지표 이름이 바뀔 수 있어
+          # 대시보드 이관 검증이 끝나기 전에는 고정한다.
+          image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+          ports:
+            - name: metrics
+              containerPort: 9187
+          env:
+            # local 기본값. dev/prod overlay 에서 RDS 엔드포인트로 덮어쓴다.
+            - name: PGHOST
+              value: postgres.gamehouse.svc.cluster.local
+            # local in-cluster postgres 는 TLS 를 켜지 않았다. RDS 는 require 다.
+            - name: PGSSLMODE
+              value: disable
+            # postgres 파드가 쓰는 것과 같은 Secret 이다. local 전용 판단으로,
+            # dev/prod 는 pg_monitor 읽기 전용 계정을 External Secrets 로 주입하고
+            # 아래 name 셋을 그쪽으로 바꾼다. keep 목록의 지표는 pg_monitor 권한과
+            # 슈퍼유저에서 나오는 값이 같으므로 로컬 검증 결과는 그대로 유효하다.
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_DB
+            - name: DATA_SOURCE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_USER
+            - name: DATA_SOURCE_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
+            # $(VAR) 는 같은 컨테이너에서 "앞서 정의된" env 만 참조한다.
+            # 그래서 PGHOST·POSTGRES_DB·PGSSLMODE 가 위에 먼저 온다.
+            # 순서를 바꾸면 치환이 안 되고 문자열이 그대로 남아 접속이 실패한다.
+            - name: DATA_SOURCE_URI
+              value: $(PGHOST):5432/$(POSTGRES_DB)?sslmode=$(PGSSLMODE)
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              # CPU limit 이 없으면 대시보드의 '전체 컨테이너 CPU %' 패널에서
+              # 이 컨테이너가 조용히 사라진다. 그 패널이 limit 대비 %로 계산해서
+              # 분모가 없으면 나눗셈의 짝이 안 맞기 때문이다. 경고도 에러도 없다.
+              cpu: 200m
+              memory: 128Mi
+          # 프로브는 "/" 를 쓴다. "/metrics" 로 두면 프로브마다 DB 를 조회하게 된다.
+          # DB 접속 실패는 파드 상태가 아니라 pg_up 지표로 드러나는 것이 맞다.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # gamehouse 네임스페이스는 Pod Security Admission 이 restricted 다.
+          # 이 블록이 없으면 파드 생성 자체가 거부되고, Deployment 는 0/1 로 남으며
+          # 원인은 ReplicaSet 이벤트에만 찍힌다(파드가 없어 describe 로도 안 보인다).
+          # base/user/deployment.yaml 과 같은 형태로 맞췄다.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534               # 이미지의 nobody. 이름으로는 kubelet 이 검증 못 한다
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true   # exporter 는 디스크에 쓰지 않는다
+            capabilities:
+              drop: ["ALL"]
+      # 볼륨이 없으므로 fsGroup 은 두지 않는다. base/user 와 다른 점이다.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: postgres-exporter
+    app.kubernetes.io/part-of: gamehouse
+spec:
+  selector:
+    app.kubernetes.io/name: postgres-exporter
+  ports:
+    - name: metrics
+      port: 9187
+      targetPort: metrics
+---
+# base/networkpolicy-baseline.yaml 의 default-deny 가 이 네임스페이스 전체에 걸려 있다.
+# 이 정책이 없으면 exporter 파드는 DNS 조회조차 못 하고, 증상은 Target DOWN 하나뿐이라
+# 원인을 찾기 어렵다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-exporter
+  namespace: gamehouse
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres-exporter
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # 클러스터 내부(Prometheus)의 스크레이프.
+    # base/user/networkpolicy.yaml 의 actuator 스크레이프 규칙과 같은 관용구다.
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 9187
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # PostgreSQL — local 은 in-cluster 파드라 podSelector 로 좁힌다.
+    # dev/prod 는 RDS(클러스터 밖)라 이 규칙이 안 맞는다. base/user/networkpolicy.yaml
+    # 과 같은 사정이고, 같은 방식으로 overlay 에서 구체화한다.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432

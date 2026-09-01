@@ -12,16 +12,26 @@
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Alertmanager 를 끈다 — 가장 큰 절약이고 지금은 손실이 없다
+# Alertmanager — 2026-08-31 에 다시 켰다
 #
-# Phase 2 에서는 알람 규칙을 아직 안 옮겼다. 옮길 게 없으니 띄울 이유도 없다.
-# 기존 알람 7개를 PrometheusRule 로 이관할 때 다시 켠다.
+# 이 파일은 원래 Alertmanager 를 꺼두고 "알람 규칙을 이관할 때 다시 켠다"고
+# 적어두었다. 그 시점이 왔다. 규칙 9개를 PrometheusRule 로 옮겼고,
+# 이제 발송까지 이어야 알람이 사람에게 닿는다.
 #
-# ⚠️ 끈 상태에서도 PrometheusRule 은 평가된다. Prometheus UI 의 Alerts 탭에서
-#    firing 여부를 볼 수 있다. 통보만 안 나갈 뿐이다. 로컬에선 그걸로 충분하다.
+# 메모리 비용은 작다 — requests 48Mi / limits 128Mi.
+# 실측 시점 노드 사용률 70%(가용 약 2.3GB)라 여유가 있었다.
+# 저메모리 모드의 나머지 절약(retention 12h, Prometheus·Grafana 상한)은 그대로다.
+#
+# 다시 꺼야 할 만큼 메모리가 빠듯해지면 enabled: false 로 되돌린다.
+# 끈 상태에서도 PrometheusRule 평가는 계속되므로 Prometheus UI 의 Alerts 탭에서
+# firing 여부는 볼 수 있다. 통보만 안 나간다.
 # ---------------------------------------------------------------------------
 alertmanager:
-  enabled: false
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 10m, memory: 48Mi }
+      limits:   { memory: 128Mi }
 
 prometheus:
   prometheusSpec:
@@ -39,10 +49,28 @@ prometheus:
             requests:
               storage: 2Gi
 
+# ---------------------------------------------------------------------------
+# Grafana — 640Mi 로도 OOMKilled 가 났다. 2026-09-01 실측 (exit 137)
+#
+# 원인은 증가 속도가 아니라 여유폭이었다. 기저는 500MiB 안팎으로 안정적인데
+# 상한이 640Mi 라 헤드룸이 140MiB 뿐이고, 무거운 대시보드 한 장에 닿는다.
+#
+#   RSS 344 · page cache 98 · Go heap in-use 138 · heap idle 341 · Go sys 496 (MiB)
+#
+# 실제로 쓰는 힙은 138MiB 인데 341MiB 를 유휴로 붙들고 있었다.
+# 상한만 올리면 그만큼 또 붙든다 — 384 → 640 이 그랬다.
+# GOMEMLIMIT(Go 1.19+ soft limit)로 반환을 강제하는 것이 처방이고,
+# 상한은 soft limit 이 못 따라갈 때의 흡수 여유만큼만 올린다.
+#
+# CPU limit 은 없었다. HANDOVER 5.8 의 조건이라 `00 overview` 의 컨테이너 CPU
+# 패널에서 Grafana 자신이 빠지고 있었다. 실사용 24m 이라 500m 이면 렌더링 버스트도 덮는다.
+# ---------------------------------------------------------------------------
 grafana:
+  env:
+    GOMEMLIMIT: "600MiB"
   resources:
     requests: { cpu: 50m, memory: 192Mi }
-    limits:   { memory: 640Mi }     # 384Mi 는 OOMKilled 발생 — 2026-08 실측
+    limits:   { cpu: 500m, memory: 768Mi }
 
 prometheusOperator:
   resources:
