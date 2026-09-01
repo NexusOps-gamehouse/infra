@@ -70,6 +70,21 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   echo
 fi
 
+# ---------------------------------------------------------------------------
+# ⚠️ Argo CD 를 쓰지 않을 때의 경로다.
+#
+# Argo CD 를 붙였다면(scripts/k8s-local-argocd.sh) 이 apply 는 필요 없다.
+# Application 하나만 넣으면 그쪽이 같은 overlay 를 sync 한다:
+#   kubectl apply -f k8s/argocd/applications/local.yaml
+#
+# 이 apply 를 그대로 두는 이유는 두 가지다. Argo CD 없이도 클러스터를 띄울 수
+# 있어야 하고(A2 에서 설치를 분리한 것과 같은 이유), Argo CD 를 붙이기 전에
+# 워크로드가 먼저 정상인지 확인하는 순서가 EKS 의 C0 와 같기 때문이다.
+#
+# ⚠️ 단, 이미 Argo CD 가 붙어 있는 클러스터에서 이 apply 를 돌리면 안 된다.
+#    Argo CD 의 ignoreDifferences 는 매니페스트가 아니라 Application 설정이라
+#    이 경로에는 적용되지 않는다. HPA 가 올려둔 replicas 가 그대로 줄어든다.
+# ---------------------------------------------------------------------------
 echo "[5/7] GameHouse MSA 매니페스트 적용 (overlays/local)..."
 kubectl apply -k "${INFRA_DIR}/k8s/overlays/local"
 
