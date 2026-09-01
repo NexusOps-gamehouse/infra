@@ -1,0 +1,58 @@
+# ---------------------------------------------------------------------------
+# local(kind) 워크로드를 Argo CD 가 관리한다.
+#
+# 이 파일이 대체하는 것은 `kubectl apply -k k8s/overlays/local` 한 줄이다.
+# 그 명령에는 "무엇을(경로) / 어디에(kubeconfig) / 언제(사람이 엔터)" 셋이 들어
+# 있는데, 저장소에 있던 건 '무엇을' 하나뿐이었다. 나머지 둘을 여기에 적는다.
+#
+# base/overlay 는 한 줄도 바뀌지 않는다. 이 파일이 그 위에 얹힐 뿐이다.
+#
+# 적용:
+#   kubectl apply -f k8s/argocd/applications/local.yaml
+# ---------------------------------------------------------------------------
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gamehouse-local
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/NexusOps-gamehouse/infra.git
+    # 로컬 리허설이지만 소스는 원격 저장소다. Argo CD 는 작업 트리를 보지 않는다.
+    # k8s/base 와 k8s/overlays/local 이 develop 과 동일해서 이 값으로 붙는다.
+    targetRevision: develop
+    path: k8s/overlays/local
+
+  destination:
+    # 클러스터 안에서 자기 자신을 가리키는 주소. dev/prod 는 여기가 EKS 엔드포인트다.
+    server: https://kubernetes.default.svc
+    namespace: gamehouse
+
+  # syncPolicy 를 비워 둔다 — 자동 sync 는 정책을 정한 뒤에 켠다.
+  # 지금은 Argo CD 가 무엇을 다르다고 보는지 먼저 눈으로 확인하는 단계다.
+  syncPolicy: {}
+
+# ---------------------------------------------------------------------------
+# 최초 연결에서 관찰한 것 (2026-09-01, 차트 10.5.0 / Argo CD v3.5.2)
+#
+# 인수 — 이미 `kubectl apply -k` 로 떠 있던 리소스 64 개를 그대로 가져왔다. 처음에는
+# 전부 OutOfSync 로 보이는데, 추적 애노테이션이 아직 없어서다. sync 하면 각 리소스에
+# `argocd.argoproj.io/tracking-id: gamehouse-local:<group>/<kind>:<ns>/<name>` 이 붙는다.
+# 라벨이 아니라 애노테이션으로 추적한다(기본 설정).
+#
+# 현상 1 — HPA 가 올린 replica 를 Argo CD 가 되돌린다.  ⚠️ EKS 에서도 같다.
+#   최초 sync 에서 post 2→1, crew 2→1 로 줄었다. 저장소는 replicas-*.yaml 에 1 로
+#   적혀 있고 클러스터는 HPA 가 2 로 올려둔 상태였다.
+#   selfHeal 을 켜고 다시 2 로 올리자 10 초 안에 1 로 돌아왔다.
+#   overlay 에 replicas-*.yaml 과 hpa-*.yaml 이 둘 다 있는 구조가 원인이라
+#   클러스터와 무관하다. → ignoreDifferences + RespectIgnoreDifferences 로 푼다.
+#
+# 현상 2 — 주입한 API 키가 더미로 되돌아간다.  로컬 전용이다.
+#   riot-secret 의 RIOT_API_KEY 가 `RGAPI-...`(42자) → `dummy_key`(9자) 로 덮였다.
+#   k8s-local-secrets.sh 로 다시 주입하면 Application 은 영구 OutOfSync 가 된다.
+#   즉 로컬에서는 "연동이 살아 있는 상태"와 "Synced" 를 동시에 가질 수 없다.
+#   dev/prod 는 components/aws 가 평문 Secret 을 지우고 External Secrets 가 만들므로
+#   Argo CD 가 이 Secret 을 소유하지 않는다. 여기서만 나오는 장애물이다.
+# ---------------------------------------------------------------------------
