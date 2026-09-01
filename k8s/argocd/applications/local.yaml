@@ -52,13 +52,36 @@ spec:
     # HPA 가 관리하는 필드다. overlay 에 replicas-*.yaml 과 hpa-*.yaml 이 둘 다 있어
     # 같은 필드를 Argo CD 와 HPA 가 동시에 관리하는 구조가 원인이다.
     #
-    # name 을 지정하지 않아 **모든 Deployment 에 적용된다.** 서비스가 늘어도 규칙을
-    # 추가할 필요가 없고, 한 서비스에서 검증하면 나머지도 같은 규칙을 탄다.
-    # ⚠️ dev/prod 에도 그대로 옮겨야 한다. 원인이 매니페스트 구조라 클러스터와 무관하다.
+    # ⚠️ HPA 가 있는 서비스만 이름으로 지정한다. Kind 전체에 걸면 riot 처럼 HPA 가 없는
+    #    Deployment 까지 예외가 되어, git 이 replicas 를 바꿔도 반영되지 않고 HPA 도
+    #    건드리지 않는 무주공산이 된다. riot 은 git 이 계속 소유해야 한다.
+    #
+    # ⚠️ hpa-*.yaml 을 추가·삭제하면 이 목록도 함께 고친다. 둘이 어긋나면
+    #    조용히 한쪽 문제가 생긴다 — 늘리면 무주공산, 줄이면 replicas 되돌림.
+    #
+    # managedFieldsManagers 로 좁히는 방법은 이 클러스터에서 쓸 수 없다.
+    # HPA 가 없는 riot 의 /spec/replicas 도 kube-controller-manager 가 소유하고 있어
+    # 두 경우를 구분하지 못한다(2026-09-01 확인).
     - group: apps
       kind: Deployment
-      jsonPointers:
-        - /spec/replicas
+      name: user
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: post
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: chat
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: match
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: crew
+      jsonPointers: [/spec/replicas]
 
     # 로컬 전용 — k8s-local-secrets.sh 가 주입한 외부 API 키를 지키기 위해서다.
     # overlay 의 Secret 이 더미라, 이 예외가 없으면 sync 때마다 dummy_key 로 덮인다.

@@ -36,13 +36,31 @@ spec:
 
   ignoreDifferences:
     # HPA 가 관리하는 필드. local 에서 검증한 것과 동일하며 원인이 매니페스트 구조라
-    # 클러스터와 무관하게 그대로 적용된다. overlays/dev 에도 replicas-*.yaml 6개와
-    # hpa-*.yaml 5개가 함께 있다.
+    # 클러스터와 무관하게 그대로 적용된다.
+    #
+    # ⚠️ HPA 가 있는 5개만 지정한다. Kind 전체에 걸면 riot 처럼 HPA 가 없는 Deployment 도
+    #    예외가 되어 git 이 replicas 를 바꿔도 반영되지 않는다(무주공산).
+    #    hpa-*.yaml 을 추가·삭제하면 이 목록도 함께 고친다.
     - group: apps
       kind: Deployment
-      jsonPointers:
-        - /spec/replicas
-
+      name: user
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: post
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: chat
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: match
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: crew
+      jsonPointers: [/spec/replicas]
   # local 에 있던 Secret 예외는 여기 없다.
   # components/aws 가 평문 Secret 을 $patch: delete 로 지우고 ExternalSecret 이 대신
   # 들어가므로, Argo CD 가 소유하는 것은 ExternalSecret 이고 그것이 만든 Secret 은
