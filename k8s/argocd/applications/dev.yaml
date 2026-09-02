@@ -23,7 +23,7 @@ spec:
     path: k8s/overlays/dev
 
   destination:
-    # TODO: EKS API 엔드포인트. C1 에서 cluster 를 등록한 뒤 그 server URL 을 넣는다.
+    # TODO: EKS API 엔드포인트. Argo CD 에 대상 클러스터를 등록한 뒤 그 server URL 을 넣는다.
     server: REPLACE_AT_DEPLOY
     namespace: gamehouse
 

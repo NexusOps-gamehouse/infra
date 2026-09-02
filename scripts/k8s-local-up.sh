@@ -77,9 +77,10 @@ fi
 # Application 하나만 넣으면 그쪽이 같은 overlay 를 sync 한다:
 #   kubectl apply -f k8s/argocd/applications/local.yaml
 #
-# 이 apply 를 그대로 두는 이유는 두 가지다. Argo CD 없이도 클러스터를 띄울 수
-# 있어야 하고(A2 에서 설치를 분리한 것과 같은 이유), Argo CD 를 붙이기 전에
-# 워크로드가 먼저 정상인지 확인하는 순서가 EKS 의 C0 와 같기 때문이다.
+# 이 apply 를 그대로 두는 이유는 두 가지다. Argo CD 를 깔지 않고도 클러스터를
+# 띄울 수 있어야 하고, Argo CD 를 붙이기 전에 워크로드가 먼저 정상인지 확인해
+# 두면 나중에 문제가 생겼을 때 원인을 가를 수 있다 — 수동 apply 도 실패하면
+# 매니페스트 문제이고, 수동은 되는데 Argo CD 만 실패하면 GitOps 설정 문제다.
 #
 # ⚠️ 단, 이미 Argo CD 가 붙어 있는 클러스터에서 이 apply 를 돌리면 안 된다.
 #    Argo CD 의 ignoreDifferences 는 매니페스트가 아니라 Application 설정이라
