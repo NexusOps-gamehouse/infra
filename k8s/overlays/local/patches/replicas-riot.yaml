@@ -4,4 +4,4 @@ metadata:
   name: riot
   namespace: gamehouse
 spec:
-  replicas: 2
+  replicas: 1
