@@ -1,0 +1,69 @@
+# ---------------------------------------------------------------------------
+# prod(EKS) 워크로드 — 초안
+#
+# ⚠️ destination.server 가 비어 있다. EKS 클러스터가 생겨야 채울 수 있다.
+#    그 전에는 이 파일을 apply 하지 않는다.
+#
+# 정책은 local 에서 검증한 것을 그대로 옮겼다(k8s/argocd/applications/local.yaml).
+# 다른 점은 셋뿐이다 — path, targetRevision, 그리고 Secret 예외가 없다는 것.
+# ---------------------------------------------------------------------------
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gamehouse-prod
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/NexusOps-gamehouse/infra.git
+    # main 을 본다. develop → main PR 이 곧 prod 배포 승인 지점이다.
+    # 그 위에 Argo CD 수동 sync 를 얹지 않기로 했다 — 브랜치 분리가 이미 승인을
+    # 제공하고, 수동 sync 는 '머지는 됐지만 지금 내보내긴 부담스럽다'는 타이밍
+    # 통제가 따로 필요할 때만 의미가 있다.
+    targetRevision: main
+    path: k8s/overlays/prod
+
+  destination:
+    # TODO: EKS API 엔드포인트. Argo CD 에 대상 클러스터를 등록한 뒤 그 server URL 을 넣는다.
+    server: REPLACE_AT_DEPLOY
+    namespace: gamehouse
+
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - RespectIgnoreDifferences=true
+
+  ignoreDifferences:
+    # HPA 가 관리하는 필드. local 에서 검증한 것과 동일하며 원인이 매니페스트 구조라
+    # 클러스터와 무관하게 그대로 적용된다.
+    #
+    # ⚠️ HPA 가 있는 5개만 지정한다. Kind 전체에 걸면 riot 처럼 HPA 가 없는 Deployment 도
+    #    예외가 되어 git 이 replicas 를 바꿔도 반영되지 않는다(무주공산).
+    #    hpa-*.yaml 을 추가·삭제하면 이 목록도 함께 고친다.
+    - group: apps
+      kind: Deployment
+      name: user
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: post
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: chat
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: match
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: crew
+      jsonPointers: [/spec/replicas]
+  # local 에 있던 Secret 예외는 여기 없다.
+  # components/aws 가 평문 Secret 을 $patch: delete 로 지우고 ExternalSecret 이 대신
+  # 들어가므로, Argo CD 가 소유하는 것은 ExternalSecret 이고 그것이 만든 Secret 은
+  # 소유하지 않는다. 예외를 둘 대상 자체가 없다.
