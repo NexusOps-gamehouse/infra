@@ -1,8 +1,9 @@
 # ---------------------------------------------------------------------------
 # prod(EKS) 워크로드 — 초안
 #
-# ⚠️ destination.server 가 비어 있다. EKS 클러스터가 생겨야 채울 수 있다.
-#    그 전에는 이 파일을 apply 하지 않는다.
+# ⚠️ EKS 클러스터가 아직 없다. 그 전에는 이 파일을 apply 하지 않는다.
+#    apply 대상은 이 파일이 가리키는 클러스터 안의 Argo CD 다 — 즉 EKS 에 Argo CD 를
+#    설치한 뒤, 그 클러스터 컨텍스트에서 apply 한다. 컨텍스트를 확인하고 실행할 것.
 #
 # 정책은 local 에서 검증한 것을 그대로 옮겼다(k8s/argocd/applications/local.yaml).
 # 다른 점은 셋뿐이다 — path, targetRevision, 그리고 Secret 예외가 없다는 것.
@@ -25,8 +26,9 @@ spec:
     path: k8s/overlays/prod
 
   destination:
-    # TODO: EKS API 엔드포인트. Argo CD 에 대상 클러스터를 등록한 뒤 그 server URL 을 넣는다.
-    server: REPLACE_AT_DEPLOY
+    # 환경마다 Argo CD 를 그 클러스터 안에 하나씩 둔다. 이 주소는 클러스터 자신의
+    # API 를 가리키는 고정값이라 세 환경 모두 같다.
+    server: https://kubernetes.default.svc
     namespace: gamehouse
 
   syncPolicy:
