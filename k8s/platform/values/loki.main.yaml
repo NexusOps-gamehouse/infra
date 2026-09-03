@@ -1,0 +1,91 @@
+# ---------------------------------------------------------------------------
+# Loki — main(EKS) 용
+#
+# loki.local.yaml 과의 차이는 사실상 저장소 하나다. filesystem → S3.
+# 나머지 구조(SingleBinary, 스키마, 한도, 자기 관측)는 로컬에서 검증한 그대로다.
+#
+# ⚠️ deploymentMode 는 SingleBinary 다. SimpleScalable 이 아니다.
+#    그 모드는 deprecated 이고 Loki 4.0 에서 제거된다 — EKS-관측-구축계획.md 0.1
+#
+# ⚠️ S3 접근은 Pod Identity 로 한다. 액세스 키를 넣지 않는다.
+#    클러스터에 Pod Identity Agent 애드온이 이미 설치돼 있다 (2026-09-02 확인).
+#    association 이 아래 serviceAccount.name 을 참조한다.
+# ---------------------------------------------------------------------------
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  schemaConfig:
+    configs:
+      - from: "2026-01-01"
+        store: tsdb
+        object_store: s3
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  storage:
+    type: s3
+    bucketNames:
+      chunks: gamehouse-main-loki-359554936090
+      ruler:  gamehouse-main-loki-359554936090
+      admin:  gamehouse-main-loki-359554936090
+    s3:
+      region: ap-northeast-2
+  limits_config:
+    retention_period: 336h
+    ingestion_rate_mb: 10
+    ingestion_burst_size_mb: 20
+    max_label_names_per_series: 20
+  compactor:
+    working_directory: /var/loki/compactor
+    retention_enabled: true
+    delete_request_store: s3
+
+serviceAccount:
+  create: true
+  name: loki
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    size: 5Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { memory: 768Mi }
+
+minio:        { enabled: false }
+chunksCache:  { enabled: false }
+resultsCache: { enabled: false }
+gateway:      { enabled: false }
+lokiCanary:   { enabled: false }
+test:         { enabled: false }
+
+backend:        { replicas: 0 }
+read:           { replicas: 0 }
+write:          { replicas: 0 }
+ingester:       { replicas: 0 }
+querier:        { replicas: 0 }
+queryFrontend:  { replicas: 0 }
+queryScheduler: { replicas: 0 }
+distributor:    { replicas: 0 }
+compactor:      { replicas: 0 }
+indexGateway:   { replicas: 0 }
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    labels:
+      release: kps
+  selfMonitoring:
+    enabled: false
+    grafanaAgent:
+      installOperator: false
+  dashboards:
+    enabled: false
+  rules:
+    enabled: false
