@@ -22,14 +22,13 @@ patches:
   - path: patches/configmap-post.yaml
   - path: patches/configmap-chat.yaml
   - path: patches/configmap-match.yaml
-  # crew — base/kustomization.yaml 에서 제외됨. 되살릴 때 같이 푼다.
-  # - path: patches/configmap-crew.yaml
+  - path: patches/configmap-crew.yaml
   - path: patches/configmap-riot.yaml
   - path: patches/secret-db-user.yaml
   - path: patches/secret-db-post.yaml
   - path: patches/secret-db-chat.yaml
   - path: patches/secret-db-match.yaml
-  # - path: patches/secret-db-crew.yaml
+  - path: patches/secret-db-crew.yaml
   - path: patches/secret-jwt.yaml
   - path: patches/secret-rabbitmq.yaml
   - path: patches/secret-riot.yaml
@@ -38,12 +37,13 @@ patches:
   - path: patches/replicas-post.yaml
   - path: patches/replicas-chat.yaml
   - path: patches/replicas-match.yaml
-  # - path: patches/replicas-crew.yaml
+  - path: patches/replicas-crew.yaml
   - path: patches/replicas-riot.yaml
   - path: patches/hpa-user.yaml
   - path: patches/hpa-post.yaml
   - path: patches/hpa-chat.yaml
   - path: patches/hpa-match.yaml
+  - path: patches/hpa-crew.yaml
 
 # 로컬 이미지는 하나의 `gamehouse` 저장소에 서비스별 태그를 붙인다
 # (`gamehouse:<service>-develop`). base 의 서비스별 논리 이름을 이 좌표로 변환한다.
@@ -86,15 +86,20 @@ images:
   - name: gamehouse-match
     newName: gamehouse
     newTag: match-develop
+  - name: gamehouse-crew
+    newName: gamehouse
+    newTag: crew-develop
   - name: gamehouse-riot
     newName: gamehouse
     newTag: riot-develop
   - name: gamehouse-frontend
     newName: gamehouse
     newTag: frontend-develop
+  # rabbitmq 만 태그 형태가 다르다. 이 이미지는 브랜치를 따라가지 않고 리비전으로
+  # 굴리기 때문이다(dev/prod 오버레이 주석 참고). local 도 같은 이름을 쓴다.
   - name: gamehouse-rabbitmq
     newName: gamehouse
-    newTag: rabbitmq-develop
+    newTag: rabbitmq-3-1
 
 labels:
   - pairs:

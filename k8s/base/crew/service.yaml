@@ -18,3 +18,10 @@ spec:
     - name: mgmt
       port: 8180
       targetPort: mgmt
+  # House 채팅(/ws-house)이 WebSocket(STOMP)이라 chat 과 같은 이유로 파드를 고정한다.
+  # 릴레이가 있어도 스티키는 여전히 의미가 있다 — 재협상 비용을 줄인다.
+  # ALB/nginx 단에서도 sticky session(쿠키 기반)을 같이 켜는 걸 권장.
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800

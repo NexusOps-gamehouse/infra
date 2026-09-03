@@ -3,3 +3,4 @@
 !.env.example
 !.env.k8s.local.example
 .DS_Store
+load-test/k6/local/results/

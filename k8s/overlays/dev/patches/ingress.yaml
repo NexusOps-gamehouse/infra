@@ -1,4 +1,6 @@
-# ⚠️ CHANGE_ME 2곳 — dev 용 ACM 인증서 ARN, dev 도메인.
+# ⚠️ CHANGE_ME: dev 용 ACM 인증서 ARN.
+# ARN 에 AWS 계정 ID 와 리전이 포함된다 — 저장소에 그대로 남는다.
+# serviceaccount-external-secrets.yaml 의 같은 주석 참고(계정 ID 는 공개 값으로 취급한다).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

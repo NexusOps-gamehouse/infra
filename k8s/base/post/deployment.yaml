@@ -134,13 +134,24 @@ spec:
             initialDelaySeconds: 0
             periodSeconds: 15
             failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           securityContext:
             runAsNonRoot: true
             runAsUser: 999   # 이미지의 spring 계정(uid 999) — 이름으로는 kubelet 이 검증 못 한다
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false  # UPLOAD_DIR(user/post) · 임시파일 쓰기 때문에 유지
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+      volumes:
+        # readOnlyRootFilesystem: true 를 켜기 위한 쓰기 지점.
+        # Spring Boot 는 내장 Tomcat 작업 디렉터리(/tmp/tomcat.<port>.<난수>)와
+        # JVM 성능 카운터(hsperfdata)를 부팅 때 /tmp 에 만든다. 업로드 여부와 무관하게
+        # 모든 서비스에 필요하며, 못 쓰면 부팅 자체가 실패한다.
+        # Pod 와 수명을 같이하지만 Tomcat 이 매번 새로 만들므로 없어져도 무방하다.
+        - name: tmp
+          emptyDir: {}
       securityContext:
         fsGroup: 999
         seccompProfile:

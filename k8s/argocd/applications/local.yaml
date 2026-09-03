@@ -1,0 +1,147 @@
+# ---------------------------------------------------------------------------
+# local(kind) 워크로드를 Argo CD 가 관리한다.
+#
+# 이 파일이 대체하는 것은 `kubectl apply -k k8s/overlays/local` 한 줄이다.
+# 그 명령에는 "무엇을(경로) / 어디에(kubeconfig) / 언제(사람이 엔터)" 셋이 들어
+# 있는데, 저장소에 있던 건 '무엇을' 하나뿐이었다. 나머지 둘을 여기에 적는다.
+#
+# base/overlay 는 한 줄도 바뀌지 않는다. 이 파일이 그 위에 얹힐 뿐이다.
+#
+# 적용:
+#   kubectl apply -f k8s/argocd/applications/local.yaml
+# ---------------------------------------------------------------------------
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gamehouse-local
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/NexusOps-gamehouse/infra.git
+    # 로컬 리허설이지만 소스는 원격 저장소다. Argo CD 는 작업 트리를 보지 않는다.
+    # k8s/base 와 k8s/overlays/local 이 develop 과 동일해서 이 값으로 붙는다.
+    targetRevision: develop
+    path: k8s/overlays/local
+
+  destination:
+    # 환경마다 Argo CD 를 그 클러스터 안에 하나씩 둔다. 이 주소는 클러스터 자신의
+    # API 를 가리키는 고정값이라 세 환경 모두 같다.
+    server: https://kubernetes.default.svc
+    namespace: gamehouse
+
+  syncPolicy:
+    automated:
+      # 손으로 바꾼 것을 되돌린다. drift 교정이 Argo CD 를 쓰는 이유 중 하나다.
+      selfHeal: true
+
+      # prune 은 켜지 않는다. git 에서 리소스를 지운 커밋이 곧 클러스터 삭제가 되는데,
+      # 지금은 그런 변경이 없고 방어선도 PR 리뷰 하나뿐이다. 필요해지면 그때 켠다.
+      prune: false
+
+    syncOptions:
+      # ⭐ ignoreDifferences 만으로는 '상태 표시'에서만 무시된다. 이걸 켜야 sync 시점에도
+      #    그 필드를 건드리지 않는다. 이게 빠지면 다른 서비스의 배포 커밋이 들어올 때
+      #    replicas 가 함께 실려 부하 중에 파드가 줄어든다.
+      - RespectIgnoreDifferences=true
+
+      # ⚠️ 남는 문제 — client-side apply 는 자기가 보낸 매니페스트 전체를 오브젝트의
+      #    kubectl.kubernetes.io/last-applied-configuration 애노테이션에 복사해 둔다.
+      #    아래 Secret 들은 ignoreDifferences 대상이라 apply 시점에 클러스터의 실제 값
+      #    (진짜 API 키)이 채워지므로, 그 키가 애노테이션에 base64 로 한 벌 더 남는다.
+      #
+      #    ServerSideApply=true 로 없앨 수 있지만 쓰지 않는다. 그러면 이 환경만 dev/prod 와
+      #    다른 방식으로 적용되어 로컬 검증의 의미가 약해지고, 쿠버네티스가 채워 넣는
+      #    기본값까지 비교 대상이 되어 StatefulSet 예외가 하나 더 필요해진다.
+      #    dev/prod 는 ESO 가 Secret 을 만들어 이 문제가 아예 없다.
+      #
+      #    권한 상승은 아니다 — 애노테이션을 보려면 Secret 을 읽을 권한이 이미 있어야 한다.
+      #    실제 위험은 붙여넣기 사고뿐이다. `kubectl get secret -o yaml` 대신
+      #    `-o jsonpath` 로 필요한 필드만 뽑는다.
+
+  # ---------------------------------------------------------------------------
+  # Argo CD 가 소유하지 않을 필드
+  # ---------------------------------------------------------------------------
+  ignoreDifferences:
+    # HPA 가 관리하는 필드다. overlay 에 replicas-*.yaml 과 hpa-*.yaml 이 둘 다 있어
+    # 같은 필드를 Argo CD 와 HPA 가 동시에 관리하는 구조가 원인이다.
+    #
+    # ⚠️ HPA 가 있는 서비스만 이름으로 지정한다. Kind 전체에 걸면 riot 처럼 HPA 가 없는
+    #    Deployment 까지 예외가 되어, git 이 replicas 를 바꿔도 반영되지 않고 HPA 도
+    #    건드리지 않는 무주공산이 된다. riot 은 git 이 계속 소유해야 한다.
+    #
+    # ⚠️ hpa-*.yaml 을 추가·삭제하면 이 목록도 함께 고친다. 둘이 어긋나면
+    #    조용히 한쪽 문제가 생긴다 — 늘리면 무주공산, 줄이면 replicas 되돌림.
+    #
+    # managedFieldsManagers 로 좁히는 방법은 이 클러스터에서 쓸 수 없다.
+    # HPA 가 없는 riot 의 /spec/replicas 도 kube-controller-manager 가 소유하고 있어
+    # 두 경우를 구분하지 못한다(2026-09-01 확인).
+    - group: apps
+      kind: Deployment
+      name: user
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: post
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: chat
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: match
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: crew
+      jsonPointers: [/spec/replicas]
+
+    # 로컬 전용 — k8s-local-secrets.sh 가 주입한 외부 API 키를 지키기 위해서다.
+    # overlay 의 Secret 이 더미라, 이 예외가 없으면 sync 때마다 dummy_key 로 덮인다.
+    #
+    # dev/prod 에는 이 항목이 없어야 한다. 거기서는 components/aws 가 평문 Secret 을
+    # 지우고 External Secrets 가 만들므로 Argo CD 가 이 Secret 을 애초에 소유하지 않는다.
+    # ⚠️ /data 만 걸면 지켜지지 않는다. overlay 의 secret-*.yaml 이 stringData 를 쓰는데,
+    #    쿠버네티스 Secret API 는 stringData 를 data 위에 덮어쓴다. /data 만 무시하면
+    #    live 의 진짜 키가 data 로 실려 가더라도 stringData 의 dummy_key 가 이긴다.
+    #    게다가 diff 에서는 /data 를 무시하므로 Synced 로 보인다 — 조용히 실패한다.
+    #    둘 다 무시해야 target 에서 stringData 가 빠지고 live 값이 살아남는다.
+    - kind: Secret
+      name: riot-secret
+      jsonPointers:
+        - /data
+        - /stringData
+    - kind: Secret
+      name: match-llm-secret
+      jsonPointers:
+        - /data
+        - /stringData
+
+# ---------------------------------------------------------------------------
+# 최초 연결에서 관찰한 것 (2026-09-01, 차트 10.5.0 / Argo CD v3.5.2)
+#
+# 인수 — 이미 `kubectl apply -k` 로 떠 있던 리소스 64 개를 그대로 가져왔다. 처음에는
+# 전부 OutOfSync 로 보이는데, 추적 애노테이션이 아직 없어서다. sync 하면 각 리소스에
+# `argocd.argoproj.io/tracking-id: gamehouse-local:<group>/<kind>:<ns>/<name>` 이 붙는다.
+# 라벨이 아니라 애노테이션으로 추적한다(기본 설정).
+#
+# 현상 1 — HPA 가 올린 replica 를 Argo CD 가 되돌린다.  ⚠️ EKS 에서도 같다.
+#   최초 sync 에서 post 2→1, crew 2→1 로 줄었다. 저장소는 replicas-*.yaml 에 1 로
+#   적혀 있고 클러스터는 HPA 가 2 로 올려둔 상태였다.
+#   selfHeal 을 켜고 다시 2 로 올리자 10 초 안에 1 로 돌아왔다.
+#   overlay 에 replicas-*.yaml 과 hpa-*.yaml 이 둘 다 있는 구조가 원인이라
+#   클러스터와 무관하다. → ignoreDifferences + RespectIgnoreDifferences 로 푼다.
+#
+# 현상 2 — 주입한 API 키가 더미로 되돌아간다.  로컬 전용이다.
+#   riot-secret 의 RIOT_API_KEY 가 `RGAPI-...`(42자) → `dummy_key`(9자) 로 덮였다.
+#   → 위 ignoreDifferences 의 Secret 예외로 해결했다. 그 예외를 걸기 전까지는
+#     "연동이 살아 있는 상태"와 "Synced" 를 동시에 가질 수 없었다.
+#   ⚠️ 예외를 /data 에만 걸면 해결되지 않는다. overlay 가 stringData 를 쓰는데
+#     쿠버네티스가 stringData 를 data 위에 덮으므로 dummy_key 가 이긴다. 게다가
+#     diff 는 /data 를 무시하니 Synced 로 보인다 — 조용히 실패한다. 실제로 한 번
+#     그 상태였고, /stringData 를 함께 넣어 고쳤다.
+#   dev/prod 는 components/aws 가 평문 Secret 을 지우고 External Secrets 가 만들므로
+#   Argo CD 가 이 Secret 을 소유하지 않는다. 여기서만 나오는 장애물이다.
+# ---------------------------------------------------------------------------

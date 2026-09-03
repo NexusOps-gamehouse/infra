@@ -13,7 +13,7 @@
 # 전제(이 트리 밖):
 #   1) dev EKS 클러스터 + AWS Load Balancer Controller + External Secrets Operator
 #      + metrics-server (EKS 기본 탑재가 아니다 — 없으면 HPA 가 <unknown> 으로 멈춘다)
-#   2) dev 전용 RDS(PostgreSQL) + user_/post_/chat_ 스키마와 서비스별 최소권한 계정
+#   2) dev 전용 RDS(PostgreSQL) + user_/post_/chat_/match_/crew_ 스키마와 서비스별 최소권한 계정
 #   3) AWS Secrets Manager 에 gamehouse/dev/jwt, gamehouse/dev/rabbitmq,
 #      gamehouse/dev/riot, gamehouse/dev/db/<service>,
 #      gamehouse/dev/dockerhub 등록
@@ -36,8 +36,7 @@ patches:
   - path: patches/configmap-post.yaml
   - path: patches/configmap-chat.yaml
   - path: patches/configmap-match.yaml
-  # crew — base/kustomization.yaml 에서 제외됨. 되살릴 때 같이 푼다.
-  # - path: patches/configmap-crew.yaml
+  - path: patches/configmap-crew.yaml
   - path: patches/configmap-riot.yaml
   # base 의 5432 egress 는 in-cluster postgres 를 본다 — dev/prod 는 RDS(클러스터 밖)라
   # 매칭되지 않는다. 관리 포트 ingress 도 클러스터 안 파드만 허용해 ALB 헬스체크가 막힌다.
@@ -58,16 +57,21 @@ patches:
     target:
       kind: NetworkPolicy
       name: match
+  - path: patches/networkpolicy-crew.yaml
+    target:
+      kind: NetworkPolicy
+      name: crew
   - path: patches/replicas-user.yaml
   - path: patches/replicas-post.yaml
   - path: patches/replicas-chat.yaml
   - path: patches/replicas-match.yaml
-  # - path: patches/replicas-crew.yaml
+  - path: patches/replicas-crew.yaml
   - path: patches/replicas-riot.yaml
   - path: patches/hpa-user.yaml
   - path: patches/hpa-post.yaml
   - path: patches/hpa-chat.yaml
   - path: patches/hpa-match.yaml
+  - path: patches/hpa-crew.yaml
   - path: patches/pdb-chat.yaml
 
 # components/aws 의 ExternalSecret 경로 `gamehouse/ENV/...` 에서 ENV 세그먼트만
@@ -95,12 +99,12 @@ images:
   #   cd k8s/overlays/dev
   #   kustomize edit set image gamehouse-user=nexusops0713/gamehouse:user-$GIT_SHA
   #
-  # base 가 실제 레포 대신 논리 이름(gamehouse-user 등)을 쓰는 이유는, 4개 서비스가
+  # base 가 실제 레포 대신 논리 이름(gamehouse-user 등)을 쓰는 이유는, 6개 서비스가
   # 레포 하나를 태그 접두사로 공유하기 때문이다. base 에 실제 레포명을 쓰면 매칭 이름이
-  # 4개 다 같아져 서비스 하나만 골라 태그를 바꿀 수 없다(prod 오버레이 주석 참고).
+  # 6개 다 같아져 서비스 하나만 골라 태그를 바꿀 수 없다(prod 오버레이 주석 참고).
   - name: gamehouse-user
-    newName: nexusops0713/gamehouse
-    newTag: user-REPLACE_AT_DEPLOY
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-user
+    newTag: develop
   - name: gamehouse-post
     newName: nexusops0713/gamehouse
     newTag: post-REPLACE_AT_DEPLOY
@@ -108,21 +112,36 @@ images:
     newName: nexusops0713/gamehouse
     newTag: chat-REPLACE_AT_DEPLOY
   - name: gamehouse-match
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-match
+    newTag: develop
+  - name: gamehouse-crew
     newName: nexusops0713/gamehouse
-    newTag: match-REPLACE_AT_DEPLOY
-  # - name: gamehouse-crew
-  #   newName: nexusops0713/gamehouse
-  #   newTag: crew-REPLACE_AT_DEPLOY
+    newTag: crew-REPLACE_AT_DEPLOY
   - name: gamehouse-riot
-    newName: nexusops0713/gamehouse
-    newTag: riot-REPLACE_AT_DEPLOY
-  # ⚠️ rabbitmq 는 이미지를 푸시하는 CI 가 아직 없다 — infra/.github/workflows/ci-cd.yml
-  #    은 docker-compose 검증만 하고, compose 는 rabbitmq 를 build: 로 로컬 빌드한다.
-  #    EKS 는 레지스트리에서 당겨야 하므로 build-push 잡을 먼저 추가해야 한다.
-  #    dev 에 올리려면 infra CI 에 build-push 잡을 먼저 추가해야 한다.
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-riot
+    newTag: develop
+  # rabbitmq 는 CI 가 없다 — 미들웨어라 변경이 드물어서 손으로 빌드해 푸시한다.
+  #
+  #   docker buildx build --platform linux/amd64 \
+  #     -t nexusops0713/gamehouse:rabbitmq-3-1 --push infra/rabbitmq
+  #
+  # 그래서 여기만 REPLACE_AT_DEPLOY 가 아니라 고정 태그다. 배포 스크립트의
+  # `kustomize edit set image` 대상에서 rabbitmq 는 뺀다.
+  #
+  # 태그 규칙이 <svc>-develop / <svc>-<sha> 와 다른 이유:
+  #   - 브랜치·커밋 축이 의미가 없다. 내용을 정하는 건 베이스 이미지
+  #     (infra/rabbitmq/Dockerfile 의 FROM rabbitmq:3-management)와 플러그인 2개뿐이고,
+  #     dev·prod·local 이 같은 이미지를 쓴다.
+  #   - `3` 은 베이스 메이저. 4.x 로 올리면 rabbitmq-4-1 이 된다.
+  #   - `1` 은 우리 리비전. 플러그인·conf 를 건드리면 -2 로 올린다. 절대 덮어쓰지 않는다
+  #     — 덮어쓰면 롤백 대상이 사라지고, 노드 캐시 때문에 파드마다 내용이 갈린다.
+  #
+  # 베이스가 떠다니는 태그라 rabbitmq-1 과 rabbitmq-2 의 RabbitMQ 버전이 다를 수 있다.
+  # 푸시할 때 `docker buildx imagetools inspect rabbitmq:3-management` 의 다이제스트를
+  # 리비전과 함께 기록해 둔다.
   - name: gamehouse-rabbitmq
     newName: nexusops0713/gamehouse
-    newTag: rabbitmq-REPLACE_AT_DEPLOY
+    newTag: rabbitmq-3-1
 
 labels:
   - pairs:
