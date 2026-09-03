@@ -1,0 +1,159 @@
+# ---------------------------------------------------------------------------
+# kube-prometheus-stack — main(EKS) 용
+#
+# 로컬(kube-prometheus-stack.local.yaml + lowmem.local.yaml)을 하나로 합쳐
+# main 기준으로 다시 잡았다. 저메모리 오버라이드를 따로 두지 않는다.
+#
+# 노드는 t3.large × 2 (allocatable 약 7.1GiB/노드)다. 앱 Request 4,736Mi 가
+# 이미 올라가 있으므로 관측이 쓸 수 있는 여유가 넉넉하지 않다.
+# ---------------------------------------------------------------------------
+fullnameOverride: kps
+
+prometheus:
+  prometheusSpec:
+    # -----------------------------------------------------------------
+    # ⭐ 로컬의 NilUsesHelmValues: false 네 줄을 여기로 가져오지 않는다.
+    #
+    #    그 설정은 "모든 ServiceMonitor 를 잡는다"는 뜻이라 로컬 전용이다.
+    #    main 에서는 차트 기본 동작에 맡긴다 — 차트가 release: kps 라벨로
+    #    selector 를 자동 생성한다.
+    #
+    #    우리 ServiceMonitor · PodMonitor · PrometheusRule 에도 그 라벨을
+    #    붙여뒀다(components/observability). 그래서 좁히기와 차트 자신의
+    #    수집(kubelet · coredns · apiserver · grafana …)이 동시에 된다.
+    #
+    # ⚠️ serviceMonitorSelector 를 직접 명시하면 안 된다. 그러면 차트가
+    #    자기 리소스에 걸어두는 자동 selector 가 사라져서 인프라 타겟이
+    #    통째로 빠진다. 증상은 "타겟이 몇 개 없다" 하나뿐이라 찾기 어렵다.
+    # -----------------------------------------------------------------
+    serviceMonitorNamespaceSelector:
+      matchNames: [gamehouse, observability]
+    podMonitorNamespaceSelector:
+      matchNames: [gamehouse, observability]
+    ruleNamespaceSelector:
+      matchNames: [gamehouse, observability]
+
+    # 대시보드 쿼리의 rate() 창 계산이 그대로 유효하려면 로컬과 같아야 한다.
+    scrapeInterval: 30s
+
+    # ⚠️ 로컬과 달리 끈다. k6 remote write 수신구를 운영에 열어둘 이유가 없다.
+    #    부하 회차를 main 에 밀어넣을 일이 생기면 그때 켠다.
+    enableRemoteWriteReceiver: false
+
+    # 출발점이다. main 이 뜨고 실제 유입량을 재서 조정한다.
+    # 30일이 필요해지면 retention 이 아니라 Thanos/Mimir 로 풀 문제다.
+    retention: 15d
+    retentionSize: 15GB
+
+    resources:
+      requests: { cpu: 200m, memory: 512Mi }
+      limits:   { memory: 2Gi }
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          # storageClassName 을 명시하지 않는다 — EKS 1.36 에서 EBS CSI 애드온의
+          # 기본 StorageClass(gp3) 옵션을 켜면 그것이 쓰인다.
+          # ⚠️ 기본 SC 가 없으면 PVC 가 Pending 에서 안 나온다. 배포 전 확인:
+          #      kubectl get storageclass
+          resources:
+            requests:
+              storage: 20Gi
+
+grafana:
+  # ⚠️ 로컬의 adminPassword: admin 을 가져오지 않는다.
+  #    Secrets Manager → ExternalSecret 이 만든 Secret 을 참조한다.
+  #    시크릿 이름과 키를 받으면 아래를 채운다. 그 전에는 배포하면 실패한다.
+  # admin:
+  #   existingSecret: grafana-admin
+  #   userKey: admin-user
+  #   passwordKey: admin-password
+
+  # ⚠️ UI 에서 비밀번호를 바꾸지 말 것 — Secret 과 어긋나면 sidecar 의 reload 가
+  #    401 을 받고 대시보드 즉시 반영이 조용히 끊긴다. HANDOVER 5.10
+  # -----------------------------------------------------------------
+  # 노출 방식은 아직 미결정이다. 정해질 때까지 ClusterIP + port-forward 로 둔다.
+  #
+  #   앱 ALB 에 합류      비용 추가 없음. 다만 internet-facing 을 그대로 탄다
+  #   관측 전용 ALB       internal 로 둘 수 있다. ALB 하나 값이 붙는다
+  #
+  # ⚠️ 인터넷에 그냥 열지 말 것. 최소한 internal scheme 이나 인증 앞단이 필요하다.
+  # -----------------------------------------------------------------
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: false
+
+  # 로컬 실측 기반이다. 상한만 올리는 것은 처방이 아니었다 — HANDOVER 5.12
+  #   heap in-use 138MiB 인데 341MiB 를 유휴로 붙들고 있었고, 384 → 640 으로
+  #   올린 뒤에도 OOMKilled 가 났다. GOMEMLIMIT 으로 반환을 강제한다.
+  env:
+    GOMEMLIMIT: "600MiB"
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits:   { cpu: 500m, memory: 768Mi }
+
+  # 대시보드가 전부 코드화돼 있으므로 PV 가 필요 없다.
+  # ⚠️ 이 규율이 PV 를 대신한다 — UI 에서 만든 대시보드는 다음 배포에 사라진다.
+  persistence:
+    enabled: false
+
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: ALL
+      label: grafana_dashboard
+    datasources:
+      enabled: true
+      searchNamespace: ALL
+
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      access: proxy
+      url: http://loki.observability.svc.cluster.local:3100
+      jsonData:
+        maxLines: 1000
+
+# ---------------------------------------------------------------------------
+# EKS 는 컨트롤 플레인이 관리형이라 이 셋은 애초에 긁을 수 없다.
+# 로컬에서 끈 이유(kind 가 127.0.0.1 바인딩)와 결과는 같지만 원인이 다르다.
+# ---------------------------------------------------------------------------
+kubeEtcd:              { enabled: false }
+kubeControllerManager: { enabled: false }
+kubeScheduler:         { enabled: false }
+# ⚠️ kubeProxy 는 EKS 에서 DaemonSet 으로 돌기 때문에 긁을 수 있을 가능성이 있다.
+#    다만 metricsBindAddress 가 127.0.0.1 이면 DOWN 이 하나 남는다.
+#    확인 전까지는 끈다. 배포 후 한 번 켜보고 UP 이면 그대로 둔다.
+kubeProxy:             { enabled: false }
+nodeExporter:          { enabled: true }
+kube-state-metrics:    { enabled: true }
+
+prometheusOperator:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { memory: 256Mi }
+
+# ---------------------------------------------------------------------------
+# Alertmanager — 라우팅과 수신자는 여기가 아니라 AlertmanagerConfig CR 에 있다.
+#   k8s/components/observability/alertmanagerconfig-gamehouse.yaml
+#
+# ⚠️ values 에 config: 를 같이 두면 안 된다. 둘 중 하나만 쓴다. HANDOVER 5.11
+#
+# ⚠️ origin: gamehouse 라벨 판단을 main 기준으로 다시 해야 한다.
+#    로컬은 그 라벨이 붙은 것만 Discord 로 보냈지만, main 에서는
+#    KubeNodeNotReady · KubePersistentVolumeFillingUp 같은 기본 규칙이
+#    실제로 유용하다. 살릴 목록을 정한 뒤 AlertmanagerConfig 를 고친다.
+# ---------------------------------------------------------------------------
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    alertmanagerConfiguration:
+      name: gamehouse
+      global:
+        resolveTimeout: 5m
+    resources:
+      requests: { cpu: 10m, memory: 64Mi }
+      limits:   { memory: 192Mi }

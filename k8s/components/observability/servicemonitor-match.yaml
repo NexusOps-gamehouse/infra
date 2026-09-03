@@ -9,6 +9,7 @@ metadata:
   labels:
     app.kubernetes.io/name: match
     app.kubernetes.io/part-of: gamehouse
+    release: kps
 spec:
   selector:
     matchLabels:

@@ -25,6 +25,7 @@ metadata:
   labels:
     app.kubernetes.io/name: rabbitmq
     app.kubernetes.io/part-of: gamehouse
+    release: kps
 spec:
   selector:
     matchLabels:
