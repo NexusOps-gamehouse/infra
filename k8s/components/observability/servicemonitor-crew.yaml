@@ -1,0 +1,20 @@
+# Prometheus 가 crew 를 찾아가는 방법.
+# user·post·chat·match·riot 과 형태가 같다.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: crew
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: crew
+    app.kubernetes.io/part-of: gamehouse
+    release: kps
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crew     # Service 의 라벨과 정확히 일치해야 한다
+  endpoints:
+    - port: mgmt                     # Service 의 포트 '이름'. 숫자를 쓰면 안 된다
+      path: /actuator/prometheus     # Actuator 기본값. /metrics 아님
+      interval: 30s                  # 다른 서비스와 동일 — rate() 창 계산이 그대로 유효
+      metricRelabelings: []          # 카디널리티가 늘면 여기에 drop 규칙

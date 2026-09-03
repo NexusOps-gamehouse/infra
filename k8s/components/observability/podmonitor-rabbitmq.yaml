@@ -1,22 +1,10 @@
 # RabbitMQ 수집 — PodMonitor.
 #
-# 왜 ServiceMonitor 가 아닌가 (임시방편 해소, 2026-09-01)
+# Service 를 거치지 않고 파드를 직접 잡는다. rabbitmq 와 rabbitmq-headless 가
+# 같은 라벨이라 ServiceMonitor 로는 같은 파드를 두 번 긁는다.
 #
-#   rabbitmq 와 rabbitmq-headless 두 Service 가 같은 라벨을 갖고 있다.
-#   ServiceMonitor 의 selector 로는 둘을 구분할 수 없어서, 같은 파드를 두 번 긁고
-#   sum(rabbitmq_queue_messages_ready) 같은 쿼리가 2배로 나왔다.
-#
-#   그동안은 relabeling 으로 rabbitmq-headless 를 drop 해서 막고 있었다.
-#   동작은 했지만 '두 번 긁은 뒤 하나를 버리는' 우회였고, Service 가 하나 더
-#   늘거나 이름이 바뀌면 다시 깨지는 구조였다.
-#
-#   PodMonitor 는 Service 를 거치지 않고 파드를 직접 잡는다. 중복이 생길 자리가
-#   아예 없어져서 우회가 필요 없다.
-#
-#   ⚠️ 대신 전제가 바뀐다 — 파드 라벨과 '컨테이너 포트 이름'에 의존한다.
-#      실측(2026-09-01): 파드에 app.kubernetes.io/name=rabbitmq 라벨이 있고
-#      컨테이너 포트가 metrics:15692 로 이름이 붙어 있어 그대로 전환된다.
-#      base 의 StatefulSet 에서 포트 이름을 지우면 이 수집이 조용히 멈춘다.
+# ⚠️ 파드 라벨과 '컨테이너 포트 이름'에 의존한다. base 의 StatefulSet 에서
+#    metrics:15692 포트 이름을 지우면 수집이 조용히 멈춘다.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
