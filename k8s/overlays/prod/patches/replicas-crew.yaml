@@ -4,4 +4,4 @@ metadata:
   name: crew
   namespace: gamehouse
 spec:
-  replicas: 3
+  replicas: 2

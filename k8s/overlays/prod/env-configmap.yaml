@@ -1,10 +1,10 @@
 # 이 오버레이가 어떤 환경인지 한 곳에만 적어 둔다.
 # kustomization.yaml 의 `replacements` 가 이 값을 읽어 components/aws 의
-# ExternalSecret 경로 `gamehouse/ENV/...` 를 `gamehouse/prod/...` 로 치환한다.
+# ExternalSecret 경로 `gamehouse/ENV/...` 를 `gamehouse/main/...` 로 치환한다.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: gamehouse-env
   namespace: gamehouse
 data:
-  ENV: "prod"
+  ENV: "main"

@@ -51,32 +51,6 @@ spec:
             pathType: Prefix
             backend:
               service: { name: user, port: { number: 8080 } }
-          # 프로필 이미지 등 업로드 파일. user 가 파일을 소유하고 정적 리소스로 서빙한다
-          # (user/config/WebConfig 의 addResourceHandler("/uploads/**"), 인증 불필요).
-          # /api 로 시작하지 않아 눈에 잘 안 띄지만 빠뜨리면 이미지가 전부 깨진다.
-          #
-          # ⚠️ 이 규칙은 S3 로 옮기면 지운다. 임시 방편이라는 뜻이 아니라, 지금 구조가
-          #    replicas > 1 에서 이미 깨져 있다는 뜻이다 — 업로드 파일을 담는 볼륨이
-          #    없어서(PVC 도 emptyDir 도 없다) UPLOAD_DIR 기본값인 컨테이너 쓰기 레이어에
-          #    쌓인다. 그래서
-          #      - 파드마다 파일이 따로 논다. A 에 올린 이미지를 B 가 못 준다.
-          #        ALB 가 라운드로빈하므로 새로고침할 때마다 보였다 안 보였다 한다.
-          #      - 롤아웃·재시작마다 전부 사라진다. HPA 가 스케일인해도 마찬가지다.
-          #    dev 2 / prod 3 이므로 지금도 해당된다. 볼륨을 붙이는 건 해법이 아니다 —
-          #    RWO PVC 는 파드 여러 개가 못 붙고, 그러자고 replicas 를 1로 내리면
-          #    무중단 배포를 버리게 된다.
-          #
-          #    S3 + CloudFront 로 옮기면 같이 정리할 것:
-          #      1) 여기 /uploads 규칙 (dev/prod 는 CloudFront 가 S3 로 직접 보낸다)
-          #      2) overlays/local/ingress.yaml 의 같은 규칙
-          #      3) frontend/vite.config.js 의 '/uploads' 프록시
-          #      4) base/user/deployment.yaml 의 uploads emptyDir 볼륨과 마운트
-          #         (readOnlyRootFilesystem 은 이미 true 다. /tmp emptyDir 은 Tomcat
-          #          작업 디렉터리용이라 업로드와 무관하게 남는다)
-          - path: /uploads
-            pathType: Prefix
-            backend:
-              service: { name: user, port: { number: 8080 } }
           - path: /api/posts
             pathType: Prefix
             backend:

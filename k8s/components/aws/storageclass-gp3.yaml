@@ -1,0 +1,13 @@
+# EKS 영구 볼륨용 StorageClass.
+# AWS EBS CSI Driver(ebs.csi.aws.com)가 PVC 요청에 따라 gp3 EBS를 동적 생성한다.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  fsType: ext4
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

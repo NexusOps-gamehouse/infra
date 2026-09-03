@@ -4,4 +4,4 @@ metadata:
   name: match
   namespace: gamehouse
 spec:
-  replicas: 3
+  replicas: 2

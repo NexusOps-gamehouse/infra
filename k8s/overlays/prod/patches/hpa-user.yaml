@@ -4,5 +4,5 @@ metadata:
   name: user
   namespace: gamehouse
 spec:
-  minReplicas: 3
+  minReplicas: 2
   maxReplicas: 8
