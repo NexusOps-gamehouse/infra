@@ -21,8 +21,7 @@ resources:
   - servicemonitor-postgres.yaml
   - prometheusrule-gamehouse.yaml
   - alertmanagerconfig-gamehouse.yaml
-  # crew 는 base/kustomization.yaml 에서 빠져 있으므로 여기도 없다.
-  # 배포 대상에 들어오면 servicemonitor-crew.yaml 을 만들어 추가한다.
+  - servicemonitor-crew.yaml
 
 configMapGenerator:
   # 대시보드 JSON 을 ConfigMap 으로 만들면 Grafana sidecar 가 자동으로 읽어 간다.

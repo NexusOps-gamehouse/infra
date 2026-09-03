@@ -1,18 +1,12 @@
 # Alertmanager 라우팅과 수신자.
+# Prometheus 가 평가하고 Alertmanager 가 발송한다.
 #
-# 기존 EC2 는 Grafana 가 알람 평가와 발송을 모두 했다(policies.yml / contact-points.yml).
-# k8s 에서는 Prometheus 가 평가하고 Alertmanager 가 발송한다. 라우팅 판단은 그대로 옮겼다.
-#
-# ⚠️ 왜 values 의 alertmanager.config 가 아니라 이 CR 인가
-#    webhook URL 은 그 자체가 비밀번호라 파일에 적으면 안 된다. values 에서는
-#    webhook_url_file 로 Secret 을 읽으려 했는데 Prometheus Operator 가 거부한다:
-#
-#      field webhook_url_file not found in type alertmanager.discordConfig
-#
-#    Operator 는 Alertmanager 설정을 '자기 Go 구조체'로 먼저 검증한다. Alertmanager
-#    본체가 지원하는 필드라도 Operator 가 모르면 통째로 막히고, StatefulSet 이
-#    아예 안 만들어진다. AlertmanagerConfig CR 은 apiURL 을 Secret 참조로 받으므로
-#    라우팅은 git 에 남기고 URL 만 Secret 에 둘 수 있다.
+# ⚠️ values 의 alertmanager.config 가 아니라 이 CR 을 쓰는 이유:
+#    webhook URL 은 그 자체가 비밀번호라 파일에 적으면 안 되는데, values 에서
+#    Secret 을 읽으려 하면 Operator 가 자기 Go 구조체로 검증하며 거부한다
+#    (field webhook_url_file not found). 그러면 StatefulSet 이 아예 안 만들어지고
+#    CR 의 status 와 Operator 로그에만 이유가 남는다.
+#    AlertmanagerConfig 는 apiURL 을 Secret 참조로 받는다.
 #
 # Secret 은 명령형으로 만든다 (git 에 안 들어간다):
 #   kubectl -n observability create secret generic discord-webhook --from-literal=url=...
@@ -27,33 +21,22 @@ metadata:
     app.kubernetes.io/part-of: gamehouse
 spec:
   route:
-    # ---------------------------------------------------------------------
-    # ⚠️ 기본 receiver 가 'null' 이다 — 아무 데도 안 보낸다는 뜻이다.
+    # ⚠️ 기본 receiver 가 'null' 이다 — 아무 데도 안 보낸다.
+    #    Alertmanager 를 켜면 kube-prometheus-stack 기본 규칙 134건도 전부 발송
+    #    대상이 된다. 그대로 두면 첫날부터 소음이 쏟아지고, 그러다 알림을 통째로
+    #    꺼버리게 된다. origin="gamehouse" 가 붙은 우리 알람만 내보낸다.
     #
-    #    Alertmanager 를 켜면 우리 규칙 9개뿐 아니라 kube-prometheus-stack 이
-    #    기본으로 넣어준 규칙 수십 개도 전부 발송 대상이 된다. 실제로 Watchdog 과
-    #    NodeClockNotSynchronising(Docker Desktop VM 의 시계 문제)이 계속 firing 중이다.
-    #    그대로 켜면 첫날부터 소음이 쏟아지고, 그러다 알림을 통째로 꺼버리게 된다.
-    #    기존 rules.yml 이 경고한 "알람을 무력화하는 가장 흔한 경로" 다.
-    #
-    #    그래서 origin="gamehouse" 라벨이 붙은 우리 알람만 내보낸다.
-    #
-    #    ⚠️ dev/prod 에서는 이 판단을 다시 해야 한다. KubePodCrashLooping ·
-    #       KubeDeploymentReplicasMismatch 처럼 기본 규칙 중에도 운영에서 꼭
-    #       필요한 것이 있다. 로컬이라 끈 것이지 필요 없어서 끈 것이 아니다.
-    # ---------------------------------------------------------------------
+    #    ⚠️ main 에서는 기본 규칙 중 31개를 살려야 한다. KubePodCrashLooping ·
+    #       KubeNodeNotReady 처럼 운영에서 꼭 필요한 것이 있다. 선별 목록은 별도 문서.
     receiver: 'null'
-    # alertname 으로 묶는다. job 을 묶음에서 빼서 여러 서비스가 동시에 죽으면
-    # 메시지 하나에 다 들어오게 한다. 기존 policies.yml 과 같은 판단이다.
+    # alertname 으로 묶는다. job 을 빼서 여러 서비스가 동시에 죽으면 메시지 하나에 다 들어온다.
     groupBy: ['alertname']
     groupWait: 30s
     groupInterval: 5m
     repeatInterval: 4h
-
     # ⚠️ routes 는 위에서부터 먼저 맞는 것 하나만 적용된다. 순서가 곧 우선순위다.
     routes:
-      # Watchdog 은 알람 파이프라인이 살아 있는지 보려고 '일부러 항상 울리는' 규칙이다.
-      # 발송하면 안 된다.
+      # Watchdog 은 파이프라인 생존 확인용이라 '일부러 항상 울린다'. 발송하면 안 된다.
       - receiver: 'null'
         matchers:
           - name: alertname
@@ -64,16 +47,9 @@ spec:
           - name: alertname
             value: InfoInhibitor
             matchType: "="
-
       # Riot 키 만료를 맨 위에 둔다.
-      #
-      # 개발용 키가 24시간마다 만료돼 사실상 매일 울린다. 다른 critical 처럼
-      # 1시간마다 반복하면 하루에 몇 번씩 같은 알림이 오고, 그러다 알림을
-      # 꺼버리게 된다. 처음 한 번은 바로 알리되 반복만 6시간으로 늦춘다.
-      # 대응(키 재발급 + 재배포)에 10분이면 충분하므로 6시간이면 잊을 일이 없다.
-      #
-      # ⚠️ 기존 policies.yml 의 매칭은 alertname = 'Riot API 키 만료' 였다.
-      #    Prometheus 의 alertname 은 식별자 규칙을 따라 한글을 못 쓴다.
+      # 개발용 키가 24시간마다 만료돼 사실상 매일 울린다. 처음 한 번은 바로 알리되
+      # 반복만 6시간으로 늦춘다. 다른 critical 처럼 1시간마다 오면 알림을 꺼버리게 된다.
       - receiver: discord
         matchers:
           - name: origin
@@ -85,7 +61,6 @@ spec:
         groupWait: 30s
         groupInterval: 30m
         repeatInterval: 6h
-
       # 즉시 대응이 필요한 것
       - receiver: discord
         matchers:
@@ -98,7 +73,6 @@ spec:
         groupWait: 30s
         groupInterval: 5m
         repeatInterval: 1h
-
       # 관측 스택 저하 등. 서비스는 정상이므로 하루 한 번이면 충분하다.
       - receiver: discord
         matchers:
@@ -111,11 +85,9 @@ spec:
         groupWait: 5m
         groupInterval: 30m
         repeatInterval: 24h
-
   receivers:
     # 아무것도 보내지 않는 수신자. 이름이 'null' 인 문자열이어야 한다.
     - name: 'null'
-
     - name: discord
       discordConfigs:
         # URL 을 Secret 에서 읽는다. 이 파일에는 남지 않는다.
@@ -123,7 +95,6 @@ spec:
             name: discord-webhook
             key: url
           sendResolved: true
-          # {{ }} 는 Alertmanager 템플릿 문법이다.
           # PrometheusRule 의 annotations 가 여기로 들어온다.
           title: '{{ if eq .Status "firing" }}🔴{{ else }}✅{{ end }} [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
           message: |
