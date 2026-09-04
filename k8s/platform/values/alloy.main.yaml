@@ -1,35 +1,22 @@
-# ---------------------------------------------------------------------------
 # Grafana Alloy — main(EKS) 용
-#
-# alloy.local.yaml 과 거의 같다. 파이프라인 · 라벨 규약 · Loki URL 전부 그대로다.
-# gateway 를 켜지 않으므로 write 엔드포인트 주소도 바뀌지 않는다.
-#
-# 실질 변경은 둘뿐이다 — cluster 라벨과 메모리 상한.
-# ---------------------------------------------------------------------------
+# alloy.local.yaml 과 거의 같다. 실질 변경은 cluster 라벨과 메모리 상한뿐이다.
 controller:
   type: daemonset
 
 alloy:
-  # ⚠️ 노드가 2대가 되어도 켜지 않는다.
-  #    clustering 은 여러 Alloy 가 '메트릭 스크레이프 타겟'을 나눠 가질 때 쓰는
-  #    기능이다. 우리는 로그만 다루고, 아래 discovery 가 spec.nodeName 으로
-  #    자기 노드 파드만 보므로 중복될 자리가 없다. 켜면 gossip 만 늘어난다.
+  # ⚠️ 노드가 2대여도 켜지 않는다. clustering 은 메트릭 스크레이프 타겟을 나눌 때
+  #    쓰는 기능인데, 우리는 로그만 다루고 아래 discovery 가 자기 노드만 본다.
   clustering:
     enabled: false
   resources:
     requests: { cpu: 50m, memory: 128Mi }
-    # 로컬 실측 117Mi. main 은 로그량이 훨씬 많으므로 상한을 올린다.
-    limits:   { memory: 384Mi }
+    limits:   { memory: 384Mi }   # 로컬 실측 117Mi. main 은 로그량이 많다
   configMap:
     content: |-
-      // ===================================================================
       // 1. 이 노드의 파드를 찾는다
       //
-      // ⭐ 이 필터가 틀리면 EKS 에서 로그가 노드 수만큼 뻥튀기되거나 아예 안 온다.
-      //    Alloy 차트가 HOSTNAME 과 K8S_NODE_NAME 둘 다 spec.nodeName 으로
-      //    주입한다(2026-09-02 실측). 이름이 의도를 말해주는 K8S_NODE_NAME 을
-      //    먼저 쓰고, 차트가 바뀔 경우를 대비해 나머지를 뒤에 둔다.
-      // ===================================================================
+      // ⚠️ 이 필터가 틀리면 로그가 노드 수만큼 뻥튀기되거나 아예 안 온다.
+      //    차트가 K8S_NODE_NAME 과 HOSTNAME 둘 다 spec.nodeName 으로 주입한다.
       discovery.kubernetes "pod" {
         role = "pod"
         selectors {
@@ -37,13 +24,11 @@ alloy:
           field = "spec.nodeName=" + coalesce(sys.env("K8S_NODE_NAME"), sys.env("HOSTNAME"), constants.hostname)
         }
       }
-      // ===================================================================
-      // 2. k8s 메타데이터를 Loki 라벨로 승격 — 로컬과 동일하다
+      // 2. k8s 메타데이터를 Loki 라벨로 승격
       //
-      // ⭐ app 을 app.kubernetes.io/name 에서 가져오는 것이 핵심이다.
-      //    메트릭의 job 라벨과 값이 같아져서 대시보드 변수 하나로 묶인다.
+      // ⭐ app 을 app.kubernetes.io/name 에서 가져와야 메트릭의 job 라벨과 값이 같아진다.
+      //    그래야 대시보드에서 메트릭 패널과 로그 패널을 변수 하나로 묶는다.
       // ⚠️ 라벨을 함부로 늘리지 말 것. Loki 는 라벨 조합마다 스트림을 만든다.
-      // ===================================================================
       discovery.relabel "pod_logs" {
         targets = discovery.kubernetes.pod.targets
         rule {
@@ -73,22 +58,15 @@ alloy:
           target_label  = "job"
         }
       }
-      // ===================================================================
-      // 3. 컨테이너 로그를 읽는다 — k8s API 경유. 호스트 경로 마운트보다 단순하다
-      // ===================================================================
+      // 3. 컨테이너 로그를 읽는다 — k8s API 경유
       loki.source.kubernetes "pod_logs" {
         targets    = discovery.relabel.pod_logs.output
         forward_to = [loki.process.pod_logs.receiver]
       }
-      // ===================================================================
       // 4. 가공
       //
-      // ⚠️ cluster 라벨을 반드시 main 으로 바꿔둔다. 로컬 값을 그대로 두면
-      //    두 환경의 로그가 같은 스트림으로 섞여 구분이 안 된다.
-      //
-      // Spring Boot 3.3.5 라 구조화 로깅 내장 기능이 없다(3.4+ 필요).
-      // common 에 structured logging 을 넣으면 아래 stage.json 주석을 푼다.
-      // ===================================================================
+      // ⚠️ cluster 라벨이 로컬과 달라야 한다. 같으면 두 환경 로그가 한 스트림에 섞인다.
+      // Spring Boot 3.3.5 라 구조화 로깅이 없다(3.4+ 필요). 생기면 stage.json 주석을 푼다.
       loki.process "pod_logs" {
         stage.static_labels {
           values = {
@@ -103,16 +81,13 @@ alloy:
         // }
         forward_to = [loki.write.default.receiver]
       }
-      // ===================================================================
       // 5. Loki 로 보낸다 — gateway 를 안 켜므로 주소가 로컬과 같다
-      // ===================================================================
       loki.write "default" {
         endpoint {
           url = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
         }
       }
 
-# loki.source.kubernetes 는 pods/log 읽기 권한이 필요하다.
 # 로그가 안 들어오면 여기부터 확인:
 #   kubectl auth can-i get pods/log --as=system:serviceaccount:observability:alloy
 rbac:
