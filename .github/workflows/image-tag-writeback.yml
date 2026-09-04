@@ -1,0 +1,253 @@
+name: image-tag-writeback
+
+# 서비스 CI 가 ECR 에 이미지를 올린 뒤 보내는 알림을 받아,
+# 해당 서비스의 이미지 태그 한 줄만 고쳐 커밋한다.
+#
+# 이 워크플로가 하는 일은 커밋까지다. 클러스터에 반영하는 것은 Argo CD 다.
+#
+# ⚠️ repository_dispatch 는 워크플로를 **기본 브랜치에서만** 찾는다.
+#    이 파일이 main 에 없으면 요청은 204 를 받고 아무 일도 일어나지 않는다.
+#    실패로도 보이지 않으므로, 붙이기 전에 develop 을 main 에 머지해야 한다.
+
+on:
+
+  # 서비스 CI(gamehouse-{user,post,chat,match,crew,riot})가 보낸다.
+  # client_payload: { service, sha, env }
+  repository_dispatch:
+    types: [image-published]
+
+  # 손으로 실행. 알림이 유실됐을 때의 복구 수단이자 개발 중 검증 경로다.
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'user | post | chat | match | crew | riot'
+        required: true
+      sha:
+        description: '커밋 SHA 40자리 (접두사 없이)'
+        required: true
+      env:
+        description: '배포 환경'
+        required: true
+        type: choice
+        options: [dev, main]
+
+
+# 커밋·푸시에만 필요하다. 그 외 권한은 주지 않는다.
+permissions:
+  contents: write
+
+
+# ⚠️ concurrency 를 쓰지 않는다.
+#
+# 그룹당 실행 1 + 대기 1 만 유지하므로, 세 번째 알림이 오면 대기 중이던 두 번째가
+# 취소된다. 취소된 실행은 아래 재시도 코드에 도달조차 못 해서 조용히 사라진다.
+# 대신 push 가 compare-and-swap 인 성질을 쓴다 — 부딪히면 최신을 다시 받아
+# 같은 편집을 다시 한다(아래 Update image tag 참고).
+
+
+env:
+  # ⚠️ k8s-ci.yml 의 KUSTOMIZE_VERSION 과 같아야 한다. 두 파일을 함께 갱신할 것.
+  # 렌더 결과가 CI 와 달라지면 여기서 통과한 것이 PR 에서 깨진다.
+  KUSTOMIZE_VERSION: '5.8.1'
+
+
+jobs:
+
+  write-back:
+
+    name: write back image tag
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 10
+
+    steps:
+
+      # -------------------------------------------------------------
+      # 1. 두 트리거의 입력을 하나로 모으고 검증한다
+      #
+      # 값을 셸에 직접 보간하지 않고 환경변수로 받는다. ${{ }} 를 run 안에
+      # 그대로 쓰면 알림 본문이 셸 명령으로 실행될 수 있다.
+      # -------------------------------------------------------------
+
+      - name: Resolve and validate input
+
+        env:
+          IN_SERVICE: ${{ github.event.client_payload.service || inputs.service }}
+          IN_SHA:     ${{ github.event.client_payload.sha     || inputs.sha }}
+          IN_ENV:     ${{ github.event.client_payload.env     || inputs.env }}
+
+        run: |
+
+          set -euo pipefail
+
+          # rabbitmq 는 CI 가 없어 목록에 없다. 손으로 리비전을 올린다.
+          case "$IN_SERVICE" in
+            user|post|chat|match|crew|riot) ;;
+            *) echo "::error::허용되지 않은 서비스: '${IN_SERVICE}'"; exit 1 ;;
+          esac
+
+          # 환경 이름은 브랜치와 같은 dev / main 이다.
+          # 오버레이 디렉터리만 아직 prod 라서 여기서 한 번 옮겨 적는다.
+          case "$IN_ENV" in
+            dev)  BRANCH=develop; OVERLAY=dev  ;;
+            main) BRANCH=main;    OVERLAY=prod ;;
+            *) echo "::error::허용되지 않은 환경: '${IN_ENV}' (dev 또는 main)"; exit 1 ;;
+          esac
+
+          # 접두사가 붙어서 오면 안 된다. 태그 조립은 이 워크플로가 한다.
+          if ! printf '%s' "$IN_SHA" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "::error::SHA 형식이 아니다: '${IN_SHA}' (소문자 hex 40자리, 접두사 없이)"
+            exit 1
+          fi
+
+          {
+            echo "SERVICE=$IN_SERVICE"
+            echo "SHA=$IN_SHA"
+            echo "ENV=$IN_ENV"
+            echo "BRANCH=$BRANCH"
+            echo "OVERLAY=$OVERLAY"
+            echo "TAG=${IN_ENV}-${IN_SHA}"
+          } >> "$GITHUB_ENV"
+
+          echo "gamehouse-${IN_SERVICE} → ${IN_ENV}-${IN_SHA}  (${BRANCH} / overlays/${OVERLAY})"
+
+
+      # -------------------------------------------------------------
+      # 2. 도구
+      #
+      # yq 는 ubuntu-latest 러너에 기본 포함이라 설치하지 않는다.
+      # 없으면 아래에서 즉시 실패하므로 조용히 넘어가지 않는다.
+      # -------------------------------------------------------------
+
+      # 편집 스크립트를 워크플로와 같은 커밋에서 가져온다.
+      # 대상 브랜치(work/)의 사본을 쓰면 브랜치마다 다른 스크립트가 돌 수 있다.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      - name: Install kustomize
+
+        run: |
+
+          set -euo pipefail
+
+          curl -sSfL \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin kustomize
+
+          kustomize version
+          yq --version
+
+
+      # -------------------------------------------------------------
+      # 3. 편집 → 검증 → 푸시. 부딪히면 처음부터 다시
+      #
+      # rebase 하지 않는다. 6개 태그가 한 파일에 몇 줄 간격으로 있어서
+      # 되감기 방식은 충돌한다. 최신을 새로 받아 같은 편집을 다시 하면
+      # 같은 값을 넣는 작업이라 몇 번을 반복해도 결과가 같다.
+      # -------------------------------------------------------------
+
+      - name: Update image tag
+
+        run: |
+
+          set -uo pipefail
+
+          for attempt in 1 2 3 4 5; do
+
+            echo "::group::attempt ${attempt}"
+
+            cd "$GITHUB_WORKSPACE"
+            rm -rf work
+            git clone --quiet --depth 1 --branch "$BRANCH" \
+              "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" work || {
+                echo "::error::${BRANCH} 브랜치를 클론하지 못했다"
+                exit 1
+              }
+
+            cd work
+
+            KZ="k8s/overlays/${OVERLAY}/kustomization.yaml"
+
+            # newName 은 건드리지 않는다. 여기서 바꾸는 것은 newTag 한 줄뿐이다.
+            awk -v SVC="gamehouse-${SERVICE}" -v TAG="$TAG" \
+              -f "${GITHUB_WORKSPACE}/.github/scripts/set-image-tag.awk" "$KZ" > "${KZ}.new" || {
+                echo "::error::${KZ} 에서 gamehouse-${SERVICE} 항목을 찾지 못했다"
+                exit 1
+              }
+            mv "${KZ}.new" "$KZ"
+
+            # 이미 같은 값이면 할 일이 없다. 빈 커밋을 만들지 않는다.
+            if git diff --quiet; then
+              echo "이미 ${TAG} 다 — 변경 없음"
+              echo "::endgroup::"
+              exit 0
+            fi
+
+            # 편집 결과를 구조적으로 되읽어 확인한다.
+            got=$(yq ".images[] | select(.name == \"gamehouse-${SERVICE}\") | .newTag" "$KZ")
+            if [ "$got" != "$TAG" ]; then
+              echo "::error::편집 결과가 기대와 다르다: '${got}' (기대 '${TAG}')"
+              exit 1
+            fi
+
+            # 대상 한 줄 외에 바뀐 것이 있으면 중단한다.
+            changed=$(git diff --numstat -- "$KZ" | awk '{print $1"/"$2}')
+            if [ "$changed" != "1/1" ]; then
+              echo "::error::의도한 범위를 벗어난 변경 (${changed})"
+              git diff
+              exit 1
+            fi
+            if [ -n "$(git diff --name-only | grep -v "^${KZ}$" || true)" ]; then
+              echo "::error::다른 파일이 바뀌었다"
+              git diff --name-only
+              exit 1
+            fi
+
+            # 깨진 매니페스트를 커밋하지 않는다.
+            #
+            # ⚠️ 이 커밋은 GITHUB_TOKEN 으로 만들어져 push 트리거 워크플로를
+            #    깨우지 않는다. k8s-ci.yml 이 사후에 잡아주지 않으므로
+            #    여기서 확인하지 않으면 아무도 확인하지 않는다.
+            kustomize build "k8s/overlays/${OVERLAY}" > /dev/null || {
+              echo "::error::렌더가 깨졌다 — 커밋하지 않는다"
+              exit 1
+            }
+
+            git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                commit --quiet -m "chore(${ENV}): ${SERVICE} 이미지를 ${TAG} 로" -- "$KZ"
+
+            if out=$(git push origin "$BRANCH" 2>&1); then
+              echo "푸시 완료: ${BRANCH}"
+              echo "::endgroup::"
+              exit 0
+            fi
+
+            echo "$out"
+
+            # 재시도로 풀리는 실패와 아닌 실패를 구분한다.
+            #
+            # 풀리는 것   non-fast-forward. 누가 먼저 올렸을 뿐이라 최신을 다시 받으면 된다.
+            # 안 풀리는 것 브랜치 보호. 몇 번을 해도 같은 결과라 45초를 태우고 끝난다.
+            #             원인이 로그에 안 남아 "경합이 심한가" 로 오해하게 된다.
+            if printf '%s' "$out" | grep -qE 'protected branch|GH006|GH013|pre-receive hook declined'; then
+              echo "::error::${BRANCH} 브랜치 보호에 막혔다. 재시도로 풀리지 않는다"
+              echo "::error::선택지: (1) 보호 규칙에서 github-actions[bot] 을 예외로 두거나"
+              echo "::error::        (2) 직접 푸시 대신 PR 을 여는 방식으로 바꾼다"
+              echo "::error::        (2)는 GITHUB_TOKEN 으로 연 PR 이 pull_request 워크플로를"
+              echo "::error::        깨우지 않으므로 k8s-ci 가 돌지 않는다는 점을 함께 봐야 한다"
+              echo "::endgroup::"
+              exit 1
+            fi
+
+            # 누가 먼저 올렸다. 최신을 다시 받아 처음부터.
+            echo "push 거절됨(경합으로 판단) — 다시 시도한다"
+            echo "::endgroup::"
+            sleep $(( attempt * 3 + RANDOM % 3 ))
+
+          done
+
+          echo "::error::5회 시도했으나 푸시하지 못했다. workflow_dispatch 로 다시 실행할 수 있다"
+          exit 1
