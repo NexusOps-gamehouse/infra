@@ -1,0 +1,136 @@
+# ---------------------------------------------------------------------------
+# Argo CD — Main EKS(prod)용
+#
+# 차트 버전은 설치 스크립트/명령에서 고정한다. 여기 적힌 키들은 argo-cd 차트
+# 10.5.0 (appVersion v3.5.2) 기준이며, local(argocd.local.yaml)과 같은 차트다.
+#
+# ⚠️ 차트 버전을 환경마다 다르게 두지 않는다. 번들 kustomize 버전이 갈라지면
+#    .github/workflows/k8s-ci.yml 의 KUSTOMIZE_VERSION 과 어긋나서
+#    "CI 는 통과했는데 클러스터에는 다른 결과" 가 된다. 조용히 어긋난다.
+#      차트 10.5.0 = Argo CD v3.5.2 = kustomize 5.8.1
+#
+# ⚠️ 이 파일은 GitOps 대상이 아니다. 고쳐서 머지해도 반영되지 않는다.
+#    Argo CD 는 자기 자신을 관리하지 않기로 했다 — 잘못된 values 를 커밋하면
+#    Argo CD 가 스스로를 망가뜨리는데, 그 복구 수단이 방금 죽은 그 Argo CD 다.
+#    반영하려면 helm 을 직접 돌린다:
+#
+#      helm upgrade --install argocd argo/argo-cd --version 10.5.0 \
+#        -n argocd -f k8s/platform/values/argocd.prod.yaml
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# resources — 이것 때문에 첫 설치부터 이 파일을 쓴다
+#
+# 차트 기본값에는 requests·limits 가 없다. 그대로 깔면 파드 5개가 전부
+# BestEffort 로 뜨는데, 이는 노드에 메모리 압박이 오면 **가장 먼저 evict 되는
+# 등급**이다. t3.large × 2 에 앱 파드가 몰리면 배포 도구가 제일 먼저 죽는다 —
+# 장애 대응이 필요한 바로 그 순간에.
+#
+# 아래 값은 로컬(kind) 실측 기준이다. 파드 5개 합계 CPU 13m / 메모리 578Mi.
+# 실측치에 여유를 얹어 requests 를 박아 최소 Burstable 로 올린다.
+#
+# ⚠️ CPU limits 는 두지 않는다. 큰 sync 가 도는 동안 throttle 되면 배포가 느려지고,
+#    그 시점이 보통 장애 대응 중이다. 메모리만 limits 를 둬서 폭주를 막는다.
+#
+# TODO: main EKS 에 올린 뒤 `kubectl -n argocd top pods` 로 실측해 조정한다.
+#       로컬 kind 는 Application 이 1개뿐이라 repo-server 부하가 과소평가된다.
+# ---------------------------------------------------------------------------
+controller:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+server:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+  # UI 노출은 아직 결정 전이다 — 아래 "Ingress" 절 참고.
+  ingress:
+    enabled: false
+
+repoServer:
+  # 렌더링을 담당한다. Application 이 늘면 여기가 가장 먼저 부족해진다.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+applicationSet:
+  # app-of-apps 는 ApplicationSet 컨트롤러를 쓰지 않는다. Root Application 이
+  # 자식 Application CR 을 렌더해 apply 할 뿐이다. 차트 10.5.0 에는 enabled
+  # 토글이 없어 항상 배포되므로, 눕히는 대신 자원만 최소로 준다.
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+redis:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+# ---------------------------------------------------------------------------
+# 로컬과 동일하게 끄는 것 — 켜두면 파드만 늘어난다
+# ---------------------------------------------------------------------------
+dex:
+  enabled: false          # SSO 미사용. UI 를 인터넷에 열 때 다시 본다
+notifications:
+  enabled: false          # 슬랙 등 알림 연동 없음
+
+# ---------------------------------------------------------------------------
+# Ingress — 아직 켜지 않는다
+#
+# 첫 설치는 port-forward 로 간다. values 가 바꾸는 것은 UI 접근 경로뿐이고
+# git 을 읽고 apply 하는 동작과는 무관하다. ALB + ACM + Route 53 을 한 번에
+# 붙이려다 막히는 것보다, 동기화가 실제로 도는 것을 먼저 확인하는 편이 낫다.
+#
+#   kubectl -n argocd port-forward svc/argocd-server 8080:443
+#   → https://localhost:8080   (아래 insecure 가 false 이므로 443 · https 다)
+#
+# ⚠️ 인터넷에 여는 순간 Argo CD 는 클러스터 전체를 조작할 수 있는 콘솔이 된다.
+#    아래 중 하나가 정해진 뒤에 연다.
+#      - scheme: internal + VPN/Bastion      (가장 단순하고 안전)
+#      - internet-facing + SSO(dex) + RBAC   (편하지만 설정이 늘어난다)
+#      - 노출하지 않고 port-forward 만        (현재 값)
+#
+# 열기로 하면 아래를 푼다.
+#
+# global:
+#   domain: argocd.game-duo.com        # 안 바꾸면 argocd.example.com 으로 생긴다
+#
+# configs:
+#   params:
+#     # ALB 가 TLS 를 끝내므로 뒤는 평문으로 둔다. 안 끄면 ALB 는 HTTP 로 말을
+#     # 걸고 서버는 TLS 를 기대해 502 가 난다. local 에서 ingress-nginx 와 겪은
+#     # 것과 같은 문제다(argocd.local.yaml 참고).
+#     server.insecure: true
+#
+# server:
+#   ingress:
+#     enabled: true
+#     ingressClassName: alb
+#     annotations:
+#       alb.ingress.kubernetes.io/scheme: internal
+#       alb.ingress.kubernetes.io/target-type: ip
+#       alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+#       alb.ingress.kubernetes.io/certificate-arn: <환경별 ACM ARN>
+#       alb.ingress.kubernetes.io/backend-protocol: HTTP
+#       alb.ingress.kubernetes.io/healthcheck-path: /healthz
+#       # ⚠️ 워크로드 ALB(gamehouse-prod)와 반드시 다른 그룹을 쓴다.
+#       #    같으면 두 Ingress 가 ALB 하나를 서로 덮어쓴다.
+#       alb.ingress.kubernetes.io/group.name: argocd-prod
+# ---------------------------------------------------------------------------
