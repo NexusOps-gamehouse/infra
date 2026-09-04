@@ -10,11 +10,20 @@ prometheus:
     #    kubelet · coredns · apiserver · grafana 등 인프라 타겟이 통째로 빠진다.
     #    우리 리소스에도 그 라벨을 붙여뒀으므로 네임스페이스로만 좁힌다.
     serviceMonitorNamespaceSelector:
-      matchNames: [gamehouse, observability]
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [gamehouse, observability]
     podMonitorNamespaceSelector:
-      matchNames: [gamehouse, observability]
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [gamehouse, observability]
     ruleNamespaceSelector:
-      matchNames: [gamehouse, observability]
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [gamehouse, observability]
 
     scrapeInterval: 30s        # 대시보드의 rate() 창 계산이 로컬과 같아야 한다
     enableRemoteWriteReceiver: false   # k6 수신구를 운영에 열어둘 이유가 없다
