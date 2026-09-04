@@ -93,22 +93,22 @@ images:
   # 애플리케이션 이미지는 origin/main과 일치하는 commit SHA 태그로 고정한다.
   - name: gamehouse-user
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-user
-    newTag: 152c8756ba5d7f6a2dbc36271561221cae9fa33c
+    newTag: main-741dcd50482ba71beb55258972158a7bcc211425
   - name: gamehouse-post
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-post
-    newTag: 7e2d2262dc3bf6c525ef6766f314d4c2ebf32b40
+    newTag: main-bbffef929e6d5f63569c5ab77b60873760b6e10f
   - name: gamehouse-chat
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-chat
-    newTag: 8a2b4ee6da30a254b50abac57d949e56eefdd9dc
+    newTag: main-ba622c312ed0883d2546199460a077f3e7953d9b
   - name: gamehouse-match
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-match
-    newTag: 4cfe8e986cab719966b4218e061f4d92318aca03
+    newTag: main-8b93615d72e783231a5ce91ad2abdcc7adbeeb57
   - name: gamehouse-crew
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-crew
-    newTag: 60d1d0e5243abae2e60e438c52234221cb96f32b
+    newTag: main-9eb38d9a0fa1016c13e07386ca5644a2e02184ba
   - name: gamehouse-riot
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-riot
-    newTag: e7ed75815b43f7d93911eaf8560cce9a3b36e05a
+    newTag: main-914ab55a7d00c98890c89503a41e290392441c5e
 
   # RabbitMQ는 별도로 관리하는 고정 revision 이미지를 사용한다.
   - name: gamehouse-rabbitmq

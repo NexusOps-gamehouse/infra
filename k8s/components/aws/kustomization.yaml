@@ -33,6 +33,7 @@ resources:
   - external-secrets/external-secret-db-crew.yaml
 
 patches:
+  - path: patches/service-healthchecks.yaml
   - path: patches/rabbitmq-storage-gp3.yaml
 
   # base 의 placeholder Secret 삭제 — ExternalSecret 이 같은 이름으로 다시 만든다.

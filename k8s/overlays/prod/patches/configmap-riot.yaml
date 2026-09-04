@@ -5,3 +5,4 @@ metadata:
   namespace: gamehouse
 data:
   ENV_NAME: "prod"
+  CORS_ALLOWED_ORIGINS: "https://game-duo.com"
