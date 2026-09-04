@@ -1,9 +1,9 @@
 # ---------------------------------------------------------------------------
 # prod(EKS) 워크로드 — 초안
 #
-# ⚠️ EKS 클러스터가 아직 없다. 그 전에는 이 파일을 apply 하지 않는다.
-#    apply 대상은 이 파일이 가리키는 클러스터 안의 Argo CD 다 — 즉 EKS 에 Argo CD 를
-#    설치한 뒤, 그 클러스터 컨텍스트에서 apply 한다. 컨텍스트를 확인하고 실행할 것.
+# Main EKS(gamehouse-main) 워크로드용 Argo CD Application.
+# EKS에 Argo CD 설치가 완료된 후 해당 클러스터 컨텍스트에서 apply 한다.
+# main 브랜치의 k8s/overlays/prod를 Main 환경의 배포 기준으로 사용한다.
 #
 # 정책은 local 에서 검증한 것을 그대로 옮겼다(k8s/argocd/applications/local.yaml).
 # 다른 점은 셋뿐이다 — path, targetRevision, 그리고 Secret 예외가 없다는 것.
