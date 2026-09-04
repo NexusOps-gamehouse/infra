@@ -112,7 +112,7 @@ images:
     newTag: dev-4690b4435bb08f0218db4ac2d8a2d56440f92eac
   - name: gamehouse-post
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-post
-    newTag: dev-ae83c169654673be526c0fb094c98719e60ba319
+    newTag: dev-ecf61447775e64d7ddd4628a98b348c1b421bdc2
   - name: gamehouse-chat
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-chat
     newTag: dev-46354c51d114bf7d1ccb32d433f1ab787bf0afdc
