@@ -124,7 +124,7 @@ images:
     newTag: dev-b23a4de787cc71472479d8d63119cf5291a5ab7f
   - name: gamehouse-riot
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-riot
-    newTag: dev-7d0de55ff26cb4deb77684bcda14619c119bb6d4
+    newTag: dev-7a2794116d33c4abe6fc9e1465ed9600f93c5ccd
   # rabbitmq 는 CI 가 없다 — 미들웨어라 변경이 드물어서 손으로 빌드해 푸시한다.
   #
   #   docker buildx build --platform linux/amd64 \
