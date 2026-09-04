@@ -93,42 +93,48 @@ replacements:
           index: 1
 
 images:
-  # prod 와 동일하게 CI 가 커밋 SHA 를 박는다. 기본값을 존재하지 않는 태그로 둬서
-  # CI 가 이 단계를 빼먹으면 ImagePullBackOff 로 즉시 드러나게 하는 것도 그대로다.
+  # 서비스마다 ECR 레포가 따로 있고, 태그는 <환경>-<커밋 SHA> 다.
+  #   develop 푸시  →  :develop 과 :dev-<sha>
+  #   main 승격     →  :main    과 :main-<sha>   (재빌드 없이 태그만 추가)
   #
-  #   cd k8s/overlays/dev
-  #   kustomize edit set image gamehouse-user=nexusops0713/gamehouse:user-$GIT_SHA
+  # 여기에는 :dev-<sha> 만 쓴다. :develop 은 이동 태그라서, 새 이미지를 올려도
+  # 이 파일이 한 글자도 안 바뀐다 → Argo CD 가 동기화할 것을 못 찾는다.
+  # 이름만 다를 뿐 :latest 와 같다.
   #
-  # base 가 실제 레포 대신 논리 이름(gamehouse-user 등)을 쓰는 이유는, 6개 서비스가
-  # 레포 하나를 태그 접두사로 공유하기 때문이다. base 에 실제 레포명을 쓰면 매칭 이름이
-  # 6개 다 같아져 서비스 하나만 골라 태그를 바꿀 수 없다(prod 오버레이 주석 참고).
+  # 이 값은 서비스 CI 의 repository_dispatch 를 받아 워크플로가 갱신한다.
+  # 손으로 고칠 때도 `kustomize edit set image` 는 쓰지 않는다 — 파일 전체를
+  # 재작성해서 주석이 원래 자리에서 떨어져 엉뚱한 항목을 설명하게 된다.
+  #
+  # base 가 실제 레포 대신 논리 이름(gamehouse-user 등)을 쓰는 이유는, 예전에
+  # 6개 서비스가 Docker Hub 레포 하나를 태그 접두사로 공유했기 때문이다. ECR 로
+  # 옮긴 뒤에도 논리 이름은 그대로 둔다 — 매칭 키가 바뀌면 base 도 함께 고쳐야 한다.
   - name: gamehouse-user
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-user
-    newTag: develop
+    newTag: dev-f30f0572bd5391a222aa03e6cb8453534a6ae120
   - name: gamehouse-post
-    newName: nexusops0713/gamehouse
-    newTag: post-REPLACE_AT_DEPLOY
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-post
+    newTag: dev-ae83c169654673be526c0fb094c98719e60ba319
   - name: gamehouse-chat
-    newName: nexusops0713/gamehouse
-    newTag: chat-REPLACE_AT_DEPLOY
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-chat
+    newTag: dev-2569887c27769d4b7d2fded931ae5767695dc983
   - name: gamehouse-match
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-match
-    newTag: develop
+    newTag: dev-bb1a5da1da003c1265bac2326f6e02dcecce1768
   - name: gamehouse-crew
-    newName: nexusops0713/gamehouse
-    newTag: crew-REPLACE_AT_DEPLOY
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-crew
+    newTag: dev-2c8f115e6bb2eae449202e9164a2fef80066cc39
   - name: gamehouse-riot
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-riot
-    newTag: develop
+    newTag: dev-7d0de55ff26cb4deb77684bcda14619c119bb6d4
   # rabbitmq 는 CI 가 없다 — 미들웨어라 변경이 드물어서 손으로 빌드해 푸시한다.
   #
   #   docker buildx build --platform linux/amd64 \
   #     -t nexusops0713/gamehouse:rabbitmq-3-1 --push infra/rabbitmq
   #
-  # 그래서 여기만 REPLACE_AT_DEPLOY 가 아니라 고정 태그다. 배포 스크립트의
-  # `kustomize edit set image` 대상에서 rabbitmq 는 뺀다.
+  # 그래서 여기만 <환경>-<sha> 가 아니라 고정 태그이고, 레지스트리도 아직
+  # Docker Hub 다. 자동 갱신(repository_dispatch)의 서비스 허용 목록에서 뺀다.
   #
-  # 태그 규칙이 <svc>-develop / <svc>-<sha> 와 다른 이유:
+  # 태그 규칙이 dev-<sha> / main-<sha> 와 다른 이유:
   #   - 브랜치·커밋 축이 의미가 없다. 내용을 정하는 건 베이스 이미지
   #     (infra/rabbitmq/Dockerfile 의 FROM rabbitmq:3-management)와 플러그인 2개뿐이고,
   #     dev·prod·local 이 같은 이미지를 쓴다.
