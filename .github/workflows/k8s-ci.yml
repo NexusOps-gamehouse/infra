@@ -296,11 +296,15 @@ jobs:
   # ===============================================================
   # ARGO CD APPLICATION 검증
   #
-  # 이 파일들은 kustomize 트리 밖이라 위 render job 이 건드리지 않는다.
-  # 지금까지 아무 검사도 받지 않아서, 필드 오타나 스키마 위반이 PR 을 통과하고
-  # Argo CD 에 등록할 때 처음 드러났다.
+  # 이 파일들은 워크로드 kustomize 트리 밖이라 위 render job 이 건드리지 않는다.
+  # 검사가 없으면 필드 오타나 스키마 위반이 PR 을 통과하고 Argo CD 에 등록할 때
+  # 처음 드러난다.
   #
-  # 렌더링이 필요 없으므로 kustomize 는 설치하지 않는다.
+  # Root App(app-of-apps) 구조로 바뀌면서 검사 대상이 늘었다.
+  #   - Root 가 읽는 것은 환경 디렉터리의 **렌더 결과**다. 그래서 kustomize 가 필요하다.
+  #     kustomization.yaml 이 없는 파일을 resources 에 적어도 raw 파일 검사로는 안 잡힌다.
+  #   - Root 자신(root/*.yaml)도 검사 대상이다.
+  #   - applications/ 바로 아래의 flat .yaml 은 구조 위반이다(아래 assertion 참고).
   # ===============================================================
 
   argocd:
@@ -317,6 +321,18 @@ jobs:
         uses: actions/checkout@v4
 
 
+      # render job 과 같은 버전을 쓴다. Argo CD 번들 kustomize 와 어긋나면
+      # CI 는 통과했는데 클러스터에는 다른 결과가 적용된다.
+      - name: Install kustomize
+        run: |
+
+          curl -sSfL \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin kustomize
+
+          kustomize version
+
+
       - name: Install kubeconform
         run: |
 
@@ -327,12 +343,85 @@ jobs:
           kubeconform -v
 
 
+      # -------------------------------------------------------------
+      # 구조 검사
+      #
+      # 세 환경의 Application 은 destination 이 전부 같다
+      # (kubernetes.default.svc / gamehouse). 환경마다 Argo CD 를 그 클러스터에
+      # 하나씩 두기로 한 설계의 귀결이다.
+      #
+      # 그래서 Root 의 path 를 한 단계 위로 잘못 적으면 Root 가 세 환경을 전부
+      # 만들고, local 오버레이(더미 평문 Secret, in-cluster postgres, frontend)가
+      # 운영 네임스페이스에 적용된다. 경로 한 글자에 그것이 걸려 있으면 안 된다.
+      #
+      # flat .yaml 을 하나도 두지 않으면 잘못 적은 경로는 렌더 에러로 즉시 죽는다.
+      # 이 검사는 그 전제를 지킨다.
+      # -------------------------------------------------------------
+
+      - name: Assert directory structure
+        run: |
+
+          fail=0
+
+          flat=$(find k8s/argocd/applications -maxdepth 1 \( -name '*.yaml' -o -name '*.yml' \) )
+
+          if [ -n "$flat" ]; then
+
+            echo "::error::applications/ 바로 아래에 매니페스트가 있다. 환경 디렉터리로 옮긴다"
+            echo "$flat"
+            fail=1
+
+          fi
+
+          for d in k8s/argocd/applications/*/; do
+
+            if [ ! -f "${d}kustomization.yaml" ]; then
+
+              echo "::error::${d} 에 kustomization.yaml 이 없다 — Root 가 렌더할 수 없다"
+              fail=1
+
+            fi
+
+          done
+
+          if [ "$fail" -eq 0 ]; then echo "structure OK"; fi
+
+          exit "$fail"
+
+
+      # -------------------------------------------------------------
+      # 스키마 검증
+      #
       # Application 은 CRD 라 내장 스키마에 없다. render job 과 같은 카탈로그에서
       # argoproj.io 스키마를 받는다.
       #
       # -ignore-missing-schemas 는 쓰지 않는다. 스키마를 못 받으면 검증이 조용히
       # 건너뛰어져 이 job 이 있으나 마나가 된다. 404 면 그것도 알아야 한다.
-      - name: Validate Argo CD manifests
+      # -------------------------------------------------------------
+
+      - name: Validate rendered applications
+        run: |
+
+          SCHEMA='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+
+          for d in k8s/argocd/applications/*/; do
+
+            echo "--- $d"
+
+            kustomize build "$d" \
+              | kubeconform \
+                  -strict \
+                  -summary \
+                  -kubernetes-version "${K8S_VERSION}" \
+                  -schema-location default \
+                  -schema-location "$SCHEMA"
+
+          done
+
+
+      # Root 는 kustomize 트리에 들어 있지 않다. 사람이 직접 apply 하는 유일한
+      # 파일이라 여기서 검사하지 않으면 아무도 검사하지 않는다.
+      - name: Validate root applications
         run: |
 
           kubeconform \
@@ -341,7 +430,7 @@ jobs:
             -kubernetes-version "${K8S_VERSION}" \
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
-            k8s/argocd/applications/
+            k8s/argocd/root/
 
 
   # ===============================================================
