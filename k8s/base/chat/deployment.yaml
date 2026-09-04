@@ -123,8 +123,8 @@ spec:
             httpGet:
               path: /actuator/health
               port: mgmt
-            failureThreshold: 30
-            periodSeconds: 2
+            failureThreshold: 36
+            periodSeconds: 5
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness

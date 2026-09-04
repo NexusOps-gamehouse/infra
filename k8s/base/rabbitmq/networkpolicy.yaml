@@ -9,6 +9,7 @@ spec:
       app.kubernetes.io/name: rabbitmq
   policyTypes:
     - Ingress
+    - Egress
   ingress:
     # 이벤트를 발행/구독하는 서비스 + STOMP 를 쓰는 chat + 메트릭 스크레이프.
     - from:
@@ -47,4 +48,15 @@ spec:
       ports:
         - protocol: TCP
           port: 15692
-  # egress 는 baseline(default-deny)에 DNS 만 허용하면 충분 — rabbitmq 는 나가는 호출이 없다.
+  # RabbitMQ는 외부 서비스로 나가는 호출은 없지만
+  # Kubernetes Service/hostname 해석을 위해 DNS egress는 허용한다.
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

@@ -4,4 +4,4 @@ metadata:
   name: chat
   namespace: gamehouse
 spec:
-  replicas: 3
+  replicas: 2

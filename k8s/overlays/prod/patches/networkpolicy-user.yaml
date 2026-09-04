@@ -1,6 +1,6 @@
-# ⚠️ CHANGE_ME: prod VPC 의 실제 서브넷 CIDR 두 개.
-#   - RDS 가 있는 프라이빗 서브넷 (예: 10.0.16.0/20)
-#   - ALB 가 있는 퍼블릭 서브넷   (예: 10.0.0.0/20)
+# Main VPC에서 필요한 외부 AWS 리소스의 CIDR만 허용한다.
+#   - RDS DB Subnet: 10.0.48.0/24, 10.0.49.0/24
+#   - ALB Public Subnet: 10.0.0.0/24, 10.0.1.0/24
 # VPC CIDR 통째로 열지 마라 — EKS VPC CNI 는 파드에도 VPC IP 를 주므로
 # VPC 전체를 열면 "모든 파드가 DB/actuator 에 접근 가능"이 되어 default-deny 가 무의미해진다.
 #
@@ -19,7 +19,9 @@
   value:
     to:
       - ipBlock:
-          cidr: CHANGE_ME_RDS_SUBNET_CIDR
+          cidr: 10.0.48.0/24
+      - ipBlock:
+          cidr: 10.0.49.0/24
     ports:
       - protocol: TCP
         port: 5432
@@ -28,7 +30,22 @@
   value:
     from:
       - ipBlock:
-          cidr: CHANGE_ME_ALB_SUBNET_CIDR
+          cidr: 10.0.0.0/24
+      - ipBlock:
+          cidr: 10.0.1.0/24
     ports:
       - protocol: TCP
         port: 8181
+
+# EKS Pod Identity credential endpoint.
+# User 서비스의 AWS SDK가 S3 Presigned URL 생성에 필요한
+# 임시 IAM credential을 노드의 Pod Identity Agent에서 가져온다.
+- op: add
+  path: /spec/egress/-
+  value:
+    to:
+      - ipBlock:
+          cidr: 169.254.170.23/32
+    ports:
+      - protocol: TCP
+        port: 80

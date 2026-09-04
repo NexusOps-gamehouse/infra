@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: user
+  namespace: gamehouse
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-port: "8181"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: post
+  namespace: gamehouse
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-port: "8182"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chat
+  namespace: gamehouse
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-port: "8183"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: match
+  namespace: gamehouse
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-port: "8185"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: crew
+  namespace: gamehouse
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-port: "8186"

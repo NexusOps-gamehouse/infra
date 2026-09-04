@@ -1,4 +1,4 @@
-# ⚠️ CHANGE_ME: prod VPC 의 실제 서브넷 CIDR 두 개.
+# Main VPC의 RDS DB Subnet과 ALB Public Subnet CIDR을 사용한다.
 #   - RDS 가 있는 프라이빗 서브넷 (예: 10.0.16.0/20)
 #   - ALB 가 있는 퍼블릭 서브넷   (예: 10.0.0.0/20)
 # VPC CIDR 통째로 열지 마라 — EKS VPC CNI 는 파드에도 VPC IP 를 주므로
@@ -19,7 +19,9 @@
   value:
     to:
       - ipBlock:
-          cidr: CHANGE_ME_RDS_SUBNET_CIDR
+          cidr: 10.0.48.0/24
+      - ipBlock:
+          cidr: 10.0.49.0/24
     ports:
       - protocol: TCP
         port: 5432
@@ -28,7 +30,9 @@
   value:
     from:
       - ipBlock:
-          cidr: CHANGE_ME_ALB_SUBNET_CIDR
+          cidr: 10.0.0.0/24
+      - ipBlock:
+          cidr: 10.0.1.0/24
     ports:
       - protocol: TCP
         port: 8182

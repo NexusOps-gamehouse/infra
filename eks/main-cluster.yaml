@@ -1,0 +1,62 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: gamehouse-main
+  region: ap-northeast-2
+  version: "1.36"
+
+# 신규 Cluster이므로 EKS Access Entry API로 Kubernetes 접근 권한을 관리한다.
+accessConfig:
+  authenticationMode: API
+
+# 기존 Main VPC를 그대로 사용한다.
+vpc:
+  id: vpc-062762ac5315747b2
+
+  subnets:
+    private:
+      ap-northeast-2a:
+        id: subnet-0ed35fac2ca0b6b45
+      ap-northeast-2c:
+        id: subnet-0ae6808386649f78b
+
+  # 구축 단계에서는 로컬 kubectl 접근을 위해 Public Endpoint를 허용한다.
+  # Worker Node에서는 Private Endpoint도 사용할 수 있도록 한다.
+  clusterEndpoints:
+    publicAccess: true
+    privateAccess: true
+
+managedNodeGroups:
+  - name: gamehouse-main-ng
+
+    instanceType: t3.large
+
+    subnets:
+      - subnet-0ed35fac2ca0b6b45
+      - subnet-0ae6808386649f78b
+
+    privateNetworking: true
+
+    minSize: 2
+    desiredCapacity: 2
+    maxSize: 4
+
+    amiFamily: AmazonLinux2023
+
+    # Worker Node root EBS.
+    # Application 영속 데이터는 RDS/S3/EBS PVC에서 별도 관리한다.
+    volumeSize: 30
+    volumeType: gp3
+
+    # IMDSv1을 비활성화하고 IMDSv2만 허용한다.
+    disableIMDSv1: true
+
+    labels:
+      environment: main
+      workload: application
+
+    tags:
+      Environment: main
+      Project: gamehouse
+      ManagedBy: eksctl
