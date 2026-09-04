@@ -8,7 +8,7 @@
 # base/overlay 는 한 줄도 바뀌지 않는다. 이 파일이 그 위에 얹힐 뿐이다.
 #
 # 적용:
-#   kubectl apply -f k8s/argocd/applications/local.yaml
+#   kubectl apply -k k8s/argocd/applications/local
 # ---------------------------------------------------------------------------
 apiVersion: argoproj.io/v1alpha1
 kind: Application

@@ -75,7 +75,7 @@ fi
 #
 # Argo CD 를 붙였다면(scripts/k8s-local-argocd.sh) 이 apply 는 필요 없다.
 # Application 하나만 넣으면 그쪽이 같은 overlay 를 sync 한다:
-#   kubectl apply -f k8s/argocd/applications/local.yaml
+#   kubectl apply -k k8s/argocd/applications/local
 #
 # 이 apply 를 그대로 두는 이유는 두 가지다. Argo CD 를 깔지 않고도 클러스터를
 # 띄울 수 있어야 하고, Argo CD 를 붙이기 전에 워크로드가 먼저 정상인지 확인해
