@@ -1,0 +1,35 @@
+# main 은 RDS 다. 컴포넌트의 local 기본값(in-cluster postgres)을 덮어쓴다.
+#
+# ⚠️ env 순서가 중요하다. DATA_SOURCE_URI 의 $(VAR) 는 '앞서 정의된' env 만 참조하므로
+#    PGHOST · POSTGRES_DB · PGSSLMODE 가 그보다 앞에 있어야 한다.
+#    kustomize 병합 후 순서가 유지되는지 반드시 렌더링해서 확인할 것.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter
+  namespace: gamehouse
+spec:
+  template:
+    spec:
+      containers:
+        - name: postgres-exporter
+          env:
+            - name: PGHOST
+              value: gamehouse-main-db.cbq2o6s2kuhe.ap-northeast-2.rds.amazonaws.com
+            - name: PGSSLMODE
+              value: require
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-exporter-db
+                  key: POSTGRES_DB
+            - name: DATA_SOURCE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-exporter-db
+                  key: POSTGRES_USER
+            - name: DATA_SOURCE_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-exporter-db
+                  key: POSTGRES_PASSWORD
