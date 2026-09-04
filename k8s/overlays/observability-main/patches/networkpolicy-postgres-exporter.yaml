@@ -1,0 +1,26 @@
+#
+# ⚠️ NetworkPolicy 의 egress 는 병합 키가 없어 이 패치가 목록 전체를 대체한다.
+#    그래서 DNS 규칙도 여기 다시 적어야 한다. 빠뜨리면 exporter 가 호스트 이름을
+#    해석하지 못하고, 증상은 Target DOWN 하나뿐이라 원인을 찾기 어렵다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-exporter
+  namespace: gamehouse
+spec:
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 10.0.48.0/24
+        - ipBlock:
+            cidr: 10.0.49.0/24
+      ports:
+        - protocol: TCP
+          port: 5432
