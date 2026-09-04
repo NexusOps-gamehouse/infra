@@ -241,14 +241,25 @@ jobs:
 
           fi
 
-          # (4) :latest 태그.
+          # (4) 이동 태그.
           #
-          # 무엇이 돌고 있는지 알 수 없어지고 롤백도 불가능하다.
-          lat=$(grep -E '^[[:space:]]+image:.*:latest[[:space:]]*$' "$R" || true)
+          # 내용이 바뀌어도 태그 문자열이 그대로인 태그들이다. 매니페스트가 안 바뀌니
+          # Argo CD 가 동기화할 것을 못 찾고, 무엇이 돌고 있는지도 알 수 없어진다.
+          # 롤백 기준도 사라진다.
+          #
+          #   latest            관례적 이동 태그
+          #   develop / main    서비스 CI 가 브랜치마다 올리는 이동 태그.
+          #                     ECR 에 있는 것 자체는 문제가 아니다(사람이 당겨 볼 때 쓴다).
+          #                     매니페스트가 그것을 가리키는 것이 문제다.
+          #
+          # 배포에 쓸 것은 dev-<sha> / main-<sha> 다.
+          # local 오버레이는 레지스트리를 쓰지 않으므로 해당이 없다.
+          lat=$(grep -E '^[[:space:]]+image:.*:(latest|develop|main)[[:space:]]*$' "$R" || true)
 
           if [ -n "$lat" ]; then
 
-            echo "::error::${OVERLAY}: :latest 태그는 사용하지 않는다"
+            echo "::error::${OVERLAY}: 이동 태그(:latest, :develop, :main)는 사용하지 않는다"
+            echo "::error::배포에는 dev-<sha> / main-<sha> 를 쓴다"
             echo "$lat"
             fail=1
 
