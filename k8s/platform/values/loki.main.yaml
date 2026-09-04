@@ -53,6 +53,10 @@ singleBinary:
   persistence:
     enabled: true
     size: 5Gi
+    # ⚠️ 클러스터에 기본 StorageClass 가 없다.
+    #    명시하지 않으면 PVC 가 Pending 으로 멈춘다.
+    #    gp2 도 있지만 provisioner 가 in-tree(kubernetes.io/aws-ebs) 라 쓸 수 없다.
+    storageClass: gp3
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits:   { memory: 768Mi }
