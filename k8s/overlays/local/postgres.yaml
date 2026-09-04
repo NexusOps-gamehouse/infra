@@ -218,6 +218,9 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: crew
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres-exporter
       ports:
         - protocol: TCP
           port: 5432

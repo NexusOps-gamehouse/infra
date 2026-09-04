@@ -1,0 +1,47 @@
+# ---------------------------------------------------------------------------
+# Argo CD — kind 로컬용
+#
+# 차트 버전은 스크립트(scripts/k8s-local-argocd.sh)에서 고정한다.
+# 여기 적힌 키들은 argo-cd 차트 10.5.0 (appVersion v3.5.2) 기준이다.
+#
+# ⚠️ 차트를 올릴 때는 이 파일의 키가 그대로 유효한지 확인할 것:
+#      helm show values argo/argo-cd --version <새버전> | grep -n '<키>'
+# ---------------------------------------------------------------------------
+
+# server.ingress.hostname 의 기본값이 이 값을 따라간다.
+# 안 바꾸면 argocd.example.com 으로 Ingress 가 만들어져서 열리지 않는다.
+global:
+  domain: argocd.local
+
+configs:
+  params:
+    # ---------------------------------------------------------------------
+    # argocd-server 는 기본적으로 자체 self-signed TLS 를 켠다.
+    # 우리 구조는 ingress-nginx 가 앞에서 TLS 를 끝내므로, 뒤에서 또 TLS 를
+    # 하면 nginx 는 평문으로 말을 걸고 서버는 TLS 를 기대해서 502 가 난다.
+    #
+    # 대안은 nginx 쪽에 ssl-passthrough 를 켜는 것인데, 로컬에서는
+    # 서버를 평문으로 두는 쪽이 단순하다. EKS 에서는 ALB + ACM 이라 다시 본다.
+    # ---------------------------------------------------------------------
+    server.insecure: true
+
+server:
+  # gamehouse.local 과 같은 방식이다. /etc/hosts 에 아래 한 줄이 필요하다:
+  #   127.0.0.1 argocd.local
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+
+# ---------------------------------------------------------------------------
+# 로컬에서 필요 없는 컴포넌트 — 켜두면 파드만 늘어난다
+# ---------------------------------------------------------------------------
+dex:
+  enabled: false          # SSO 를 안 쓴다. EKS 에서 RBAC·SSO 를 붙일 때 다시 본다
+notifications:
+  enabled: false          # 슬랙 등 알림 연동을 안 한다
+
+# applicationSet 은 enabled 토글이 없다. 컨트롤러가 항상 배포된다.
+# 최초 Application 적용을 수동 1회로 가기로 해서 지금은 쓰지 않지만,
+# 파드 하나뿐이라 그냥 둔다. 정말 눕히려면 아래를 푼다.
+# applicationSet:
+#   replicas: 0

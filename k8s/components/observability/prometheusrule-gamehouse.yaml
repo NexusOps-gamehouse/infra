@@ -1,0 +1,245 @@
+# 기존 EC2 스택의 Grafana 알람 7개를 PrometheusRule 로 이관한 것.
+# 원본: observability/grafana/provisioning/alerting/rules.yml
+#
+# 지킨 원칙 (원본 파일에 명시돼 있던 것):
+#   "이 알람이 울리면 지금 사람이 뭔가 해야 하는가?" 아니면 걸지 않는다.
+#   할 일 없는 알람이 섞이면 결국 전부 무시하게 되고, 그러다 진짜를 놓친다.
+#
+# ⚠️ 형식 차이 하나가 설계를 바꿨다 — noDataState 가 없다.
+#    Grafana 알람은 규칙마다 noDataState 를 줄 수 있어서, "핵심 서비스 중단" 은
+#    Alerting 으로 두어 '시계열이 사라지는 것' 자체를 이상 신호로 잡았다.
+#    PrometheusRule 에는 그 개념이 없다. up{...} == 0 은 엔드포인트가 살아 있는데
+#    스크레이프만 실패할 때 울리고, 파드가 통째로 사라지면 시계열이 없어져
+#    아무 일도 일어나지 않는다. 가장 중요한 알람이 가장 중요한 순간에 조용해진다.
+#    → kube-state-metrics 로 짝을 세웠다 (GameHouseWorkloadUnavailable).
+#
+# ⚠️ 알람 이름을 영문으로 바꿨다. Prometheus 의 alertname 은 식별자 규칙을 따르므로
+#    "핵심 서비스 중단" 같은 이름을 쓸 수 없다. 한글 제목은 summary 로 옮겼다.
+#    Alertmanager 라우팅을 쓸 때 기존 policies.yml 의
+#    `alertname = Riot API 키 만료` 매칭은 RiotApiKeyRejected 로 바꿔야 한다.
+#
+# ⚠️ 모든 규칙에 origin: gamehouse 라벨이 붙어 있다. Alertmanager 라우팅이
+#    이 라벨로 우리 알람만 골라 Discord 로 보낸다. 이게 없으면 kube-prometheus-stack
+#    기본 규칙 수십 개가 함께 발송되어 첫날부터 소음이 된다. 라벨을 지우면
+#    그 규칙은 조용히 발송 대상에서 빠진다 — 평가는 되지만 아무도 못 받는다.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gamehouse
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: gamehouse
+    app.kubernetes.io/part-of: gamehouse
+    # kube-prometheus-stack 의 ruleSelector 가 기본값이면 release 라벨로 고른다.
+    # 로컬은 selector 를 넓게 열어뒀지만, dev/prod 에서 좁힐 때를 대비해 붙여둔다.
+    release: kps
+spec:
+  groups:
+    # ── 서비스 생존 ────────────────────────────────────────────────
+    - name: gamehouse-service
+      interval: 1m
+      rules:
+        # 원본: "핵심 서비스 중단" (up{job=~"backend|rabbitmq"} < 1, for 3m)
+        #
+        # job 을 나열하지 않고 네임스페이스로 잡는다. 서비스가 늘어날 때마다
+        # 알람 규칙을 고치는 것을 잊으면 새 서비스만 감시 밖에 남는다.
+        # postgres 는 뺀다 — exporter 가 죽는 것은 관측 장애지 서비스 장애가 아니다.
+        # (아래 ObservabilityScrapeDown 이 담당한다)
+        - alert: GameHouseServiceScrapeDown
+          expr: up{namespace="gamehouse", job!="postgres"} == 0
+          for: 3m
+          labels:
+            origin: gamehouse
+            severity: critical
+          annotations:
+            summary: '{{ $labels.job }} 수집이 3분째 실패하고 있습니다'
+            description: >-
+              파드는 있는데 /actuator/prometheus 응답이 없는 상태입니다.
+              kubectl -n gamehouse get pod -l app.kubernetes.io/name={{ $labels.job }} 로 상태를 보고,
+              로그는 Grafana Explore 에서 {namespace="gamehouse", app="{{ $labels.job }}"} 로 봅니다.
+              과거 사례 — 의존 대상(RabbitMQ·DB)이 없어 /actuator/health 가 타임아웃되고
+              startup probe 가 파드를 죽여 무한 재시작한 적이 있습니다.
+
+        # 원본: "핵심 서비스 중단"의 noDataState=Alerting 부분 + "frontend 컨테이너 중단"
+        #
+        # 두 알람이 여기서 하나로 합쳐진다.
+        #   - 파드가 통째로 사라지면 up 시계열도 사라져 위 규칙이 못 잡는다
+        #   - frontend 는 메트릭 엔드포인트가 없어 애초에 up 이 없다
+        # 기존에는 frontend 를 absent(container_last_seen{...}) 로 우회 감지했다.
+        # kube-state-metrics 를 쓰면 편법 없이 정면으로 잡힌다.
+        - alert: GameHouseWorkloadUnavailable
+          expr: >-
+            kube_deployment_status_replicas_available{namespace="gamehouse"} == 0
+            or kube_statefulset_status_replicas_ready{namespace="gamehouse"} == 0
+          for: 5m
+          labels:
+            origin: gamehouse
+            severity: critical
+          annotations:
+            summary: '{{ $labels.deployment }}{{ $labels.statefulset }} 에 정상 파드가 하나도 없습니다'
+            description: >-
+              메트릭 수집 실패가 아니라 워크로드 자체가 죽은 상태입니다. 사이트가 안 열립니다.
+              kubectl -n gamehouse describe deploy/{{ $labels.deployment }}{{ $labels.statefulset }} 로
+              이벤트를 먼저 봅니다. 이미지 pull 실패나 PodSecurity 거부는 파드가 만들어지지도
+              않으므로 파드 로그가 아니라 ReplicaSet 이벤트에 찍힙니다.
+
+    # ── 애플리케이션 ───────────────────────────────────────────────
+    - name: gamehouse-application
+      interval: 1m
+      rules:
+        # 원본: "5xx 에러 발생" (job="backend" 하나였다)
+        #
+        # 4xx 는 세지 않는다. 사용자 입력 문제라 서버가 할 일이 없고,
+        # 걷어내야 기준선이 0 이 되어 울리면 진짜가 된다. 원본 판단 그대로다.
+        # 서비스별로 나누지 않고 job 라벨로 구분한다 — 규칙 하나가 5개 서비스를 본다.
+        - alert: GameHouseServerErrors
+          expr: >-
+            sum by (job) (
+              increase(http_server_requests_seconds_count{namespace="gamehouse",status=~"5..",uri!~"/actuator.*|/ws/.*"}[5m])
+            ) > 0
+          for: 5m
+          labels:
+            origin: gamehouse
+            severity: critical
+          annotations:
+            summary: '{{ $labels.job }} 에서 최근 5분간 5xx 에러 약 {{ printf "%.0f" $value }}건'
+            description: >-
+              대시보드 00 overview 의 "에러 엔드포인트" 패널에서 위치를 확인한 뒤 로그로 넘어갑니다.
+              Grafana Explore → Loki → {namespace="gamehouse", app="{{ $labels.job }}"} |= "ERROR"
+              메트릭은 감지까지, 원인은 로그에 있습니다.
+              uri 가 UNKNOWN 으로 나오면 Spring Security 가 핸들러 매핑 전에 끊은 것이라
+              엔드포인트를 알 수 없습니다. 그때는 곧바로 로그로 갑니다.
+
+        # 원본: "Riot API 키 만료"
+        # 429 는 제외한다 — 키는 정상인데 많이 쓴 것이라 대응이 "기다림"이고, 다른 사건이다.
+        # 임계를 0 이 아니라 0.1 로 두는 이유: increase() 는 외삽이 섞여 소수로 나온다.
+        - alert: RiotApiKeyRejected
+          expr: >-
+            sum(
+              increase(http_client_requests_seconds_count{job="riot",client_name=~".*riotgames.*",status=~"401|403"}[10m])
+            ) > 0.1
+          for: 5m
+          labels:
+            origin: gamehouse
+            severity: critical
+          annotations:
+            summary: 'Riot API 호출이 거부되고 있습니다 (최근 10분 약 {{ printf "%.0f" $value }}건)'
+            description: >-
+              개발용 키는 24시간마다 만료됩니다. https://developer.riotgames.com 에서 새 키를 받아
+              secret 을 갱신하고 파드를 다시 띄웁니다.
+              kubectl -n gamehouse create secret generic riot-secret --from-literal=RIOT_API_KEY=<새 키> --dry-run=client -o yaml | kubectl apply -f -
+              kubectl -n gamehouse rollout restart deploy/riot
+              401 은 키 헤더 누락, 403 은 무효입니다. 둘 다 대응이 "키를 확인한다"라 함께 셉니다.
+
+    # ── 노드 ──────────────────────────────────────────────────────
+    - name: gamehouse-node
+      interval: 1m
+      rules:
+        # 원본: "호스트 디스크 사용률 높음" (mountpoint="/")
+        #
+        # ⚠️ mountpoint 가 환경마다 다르다. kind 노드에는 "/" 가 없고 실제 디스크는 "/var" 다.
+        #    EKS 로 옮길 때 반드시 다시 확인할 것:
+        #      count by (mountpoint) (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|ramfs|devtmpfs"})
+        #
+        # 관측 경계상 이 알람은 원래 CloudWatch 몫이다 — 노드가 죽으면 클러스터 안의
+        # Prometheus 도 같이 죽기 때문이다. EKS 구축 시 CloudWatch 로 옮기고
+        # 여기서는 지우거나, 조기 경보로 낮춰 남긴다.
+        - alert: NodeDiskUsageHigh
+          expr: >-
+            100 * (1 - node_filesystem_avail_bytes{mountpoint="/var",fstype!~"tmpfs|overlay|ramfs|devtmpfs"}
+                     / node_filesystem_size_bytes{mountpoint="/var",fstype!~"tmpfs|overlay|ramfs|devtmpfs"}) > 80
+          for: 10m
+          labels:
+            origin: gamehouse
+            severity: warning
+          annotations:
+            summary: '노드 디스크 사용률 {{ printf "%.1f" $value }}% (임계 80%)'
+            description: >-
+              이미지와 로그가 쌓인 것이 1순위 원인입니다.
+              꽉 차면 파드가 뜨지 않고 Prometheus 수집도 멈춥니다.
+              절대값보다 기울기를 봅니다 — 하루 5%씩 오르면 뭔가 새로 쌓이기 시작한 것입니다.
+
+        # 원본: "호스트 메모리 여유 부족" (< 200MB, t3.small 2GB 전제)
+        #
+        # 절대값 대신 비율로 바꿨다. 200MB 는 2GB 의 10% 였는데, 그 숫자를 그대로 옮기면
+        # 노드가 커질수록 무의미해지고(7.75GiB 에서 200MB 면 이미 죽은 뒤다),
+        # 노드 타입이 바뀔 때마다 재산정해야 한다. 비율은 그 계산을 없앤다.
+        #
+        # ⚠️ k8s 에서는 노드가 마르기 전에 kubelet 의 eviction 이 먼저 파드를 쫓아낸다.
+        #    이 알람만으로 판단하지 말고 파드 재시작과 함께 볼 것.
+        - alert: NodeMemoryLow
+          expr: 100 * node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 10
+          for: 5m
+          labels:
+            origin: gamehouse
+            severity: warning
+          annotations:
+            summary: '노드 여유 메모리 {{ printf "%.1f" $value }}% (임계 10%)'
+            description: >-
+              기존 EC2 의 200MB/2GB 와 같은 비율입니다.
+              이 아래로 가면 파드가 OOMKilled 되거나 eviction 이 시작됩니다.
+              kubectl top node 와 kubectl -n gamehouse top pod 로 확인합니다.
+
+    # ── 관측 스택 자신 ─────────────────────────────────────────────
+    - name: gamehouse-observability
+      interval: 1m
+      rules:
+        # 원본: "관측 수집 중단" (up{job=~"cadvisor|node|postgres"} < 1, for 15m)
+        #
+        # job 을 나열하지 않는다. Loki 의 job 이 "observability/loki" 형식이라
+        # 이름 나열은 놓치기 쉽다. postgres exporter 도 여기 포함된다.
+        #
+        # kps-prometheus 를 빼는 이유: Prometheus 가 죽으면 규칙을 평가할 주체가
+        # 사라진다. 자기 자신을 감시할 수는 없다. 그 영역은 CloudWatch 몫이다.
+        - alert: ObservabilityScrapeDown
+          expr: up{namespace="observability", job!~"kps-prometheus"} == 0 or up{job="postgres"} == 0
+          for: 15m
+          labels:
+            origin: gamehouse
+            severity: warning
+          annotations:
+            summary: '{{ $labels.job }} 수집이 15분째 끊겼습니다 (서비스는 정상)'
+            description: >-
+              이 job 이 담당하는 패널이 비어 보이게 됩니다. 사용자 영향은 없으므로 급하지 않지만,
+              방치하면 진짜 장애 때 볼 데이터가 없습니다.
+              등급을 warning 으로 둔 것은 그래서입니다.
+
+        # 신규 — 기존 스택에는 로그 수집이 없어 이 알람도 없었다.
+        #
+        # Alloy 는 로그 전송이 실패해도 파드가 Running 을 유지한다.
+        # Grafana 화면만 조용히 빈다. 기존 rules.yml 주석의 표현을 빌리면:
+        #   "관측 스택의 장애는 조용하다. 앱이 깨지면 사용자가 알려주지만,
+        #    관측이 깨지면 화면이 그럴듯하게 비어 있을 뿐이다."
+        #
+        # ⚠️ 재시도(loki_write_batch_retries_total)는 일부러 알람으로 걸지 않았다.
+        #    실측 시점에 이미 누적 144회였다. 평상시에 발생하는 값으로 알람을 만들면
+        #    사람이 알림을 꺼버리게 된다. 실제 유실만 건다.
+        - alert: AlloyLogsDropped
+          expr: sum by (reason) (rate(loki_write_dropped_bytes_total{job="alloy"}[5m])) > 0
+          for: 5m
+          labels:
+            origin: gamehouse
+            severity: warning
+          annotations:
+            summary: 'Alloy 가 로그를 버리고 있습니다 (사유: {{ $labels.reason }})'
+            description: >-
+              지금 이 순간의 로그가 Loki 에 남지 않고 있습니다. 장애 조사 때 그 구간이 비어 있게 됩니다.
+              reason=rate_limited 또는 stream_limited 면 Loki 쪽 한도,
+              queue_is_full 이면 Alloy 가 전송 속도를 못 따라가는 것입니다.
+              kubectl -n observability logs ds/alloy 로 확인합니다.
+
+        # 신규 — 위 ObservabilityScrapeDown 이 못 잡는 경우를 메운다.
+        # Alloy 파드가 통째로 사라지면 up{job="alloy"} 시계열도 사라져 == 0 이 성립하지 않는다.
+        # 로그 수집이 통째로 멈춘 상태가 조용히 지나가는 것을 막는다.
+        - alert: AlloyAbsent
+          expr: absent(up{job="alloy"})
+          for: 10m
+          labels:
+            origin: gamehouse
+            severity: warning
+          annotations:
+            summary: 'Alloy 타겟이 사라졌습니다 (로그 수집 중단)'
+            description: >-
+              DaemonSet 이 지워졌거나 ServiceMonitor 가 빠진 상태입니다.
+              kubectl -n observability get ds alloy 와 servicemonitor 를 확인합니다.
+              이 알람이 필요한 이유는 up == 0 규칙이 '시계열이 사라진 경우'를 못 잡기 때문입니다.

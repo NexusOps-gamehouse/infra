@@ -1,0 +1,91 @@
+# ---------------------------------------------------------------------------
+# Loki — kind 로컬용 (단일 바이너리)
+#
+# ⚠️ loki-stack 차트가 아니다. loki-stack 은 promtail 을 끌고 오는데
+#    promtail 은 2026년 3월에 EOL 됐다. grafana/loki + grafana/alloy 를 쓴다.
+#
+# ⚠️ deploymentMode 값이 차트 버전에 따라 다를 수 있다. helm 이 거부하면:
+#      helm show values grafana/loki | grep -A3 deploymentMode
+# ---------------------------------------------------------------------------
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false        # 켜면 모든 요청에 X-Scope-OrgID 헤더가 필요해진다
+
+  commonConfig:
+    # 단일 replica 에서는 반드시 1. 기본값(3)이면 쓰기가 전부 실패한다.
+    replication_factor: 1
+
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+  storage:
+    type: filesystem
+
+  limits_config:
+    retention_period: 24h
+    ingestion_rate_mb: 10
+    ingestion_burst_size_mb: 20
+    # 라벨 하나가 폭주하면 Loki 메모리가 먼저 터진다. 방어선.
+    max_label_names_per_series: 20
+
+  compactor:
+    working_directory: /var/loki/compactor
+    retention_enabled: true
+    delete_request_store: filesystem
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    size: 5Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { memory: 768Mi }
+
+# 로컬에서 필요 없는 것들 — 켜두면 파드만 늘고 Docker Desktop 메모리를 먹는다
+minio:       { enabled: false }
+chunksCache: { enabled: false }
+resultsCache: { enabled: false }
+gateway:     { enabled: false }
+lokiCanary:  { enabled: false }
+test:        { enabled: false }
+
+# 마이크로서비스 모드 컴포넌트 전부 0
+backend:        { replicas: 0 }
+read:           { replicas: 0 }
+write:          { replicas: 0 }
+ingester:       { replicas: 0 }
+querier:        { replicas: 0 }
+queryFrontend:  { replicas: 0 }
+queryScheduler: { replicas: 0 }
+distributor:    { replicas: 0 }
+compactor:      { replicas: 0 }
+indexGateway:   { replicas: 0 }
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    labels:
+      release: kps
+
+  # ⚠️ selfMonitoring 은 켜지 않는다.
+  #    켜면 로그 수집용 Loki 와 에이전트를 또 띄운다 — 우리는 Alloy 가 이미 있다.
+  selfMonitoring:
+    enabled: false
+    grafanaAgent:
+      installOperator: false
+
+  # Loki 자체 대시보드와 룰. 지금은 끄고, 필요해지면 켠다.
+  dashboards:
+    enabled: false
+  rules:
+    enabled: false

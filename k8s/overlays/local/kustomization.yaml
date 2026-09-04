@@ -14,6 +14,9 @@ resources:
   - frontend.yaml
   - ingress.yaml
 
+components:
+  - ../../components/observability
+
 patches:
   - path: patches/configmap-user.yaml
   - path: patches/configmap-post.yaml
