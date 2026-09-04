@@ -38,12 +38,13 @@ prometheus:
               storage: 20Gi
 
 grafana:
-  # ⚠️ 아직 안 채웠다. Secrets Manager 시크릿 이름·키를 받으면 아래를 살린다.
-  #    그때까지는 임의 비밀번호로 뜬다.
-  # admin:
-  #   existingSecret: grafana-admin
-  #   userKey: admin-user
-  #   passwordKey: admin-password
+  # Secret grafana-admin 은 설치 시 kubectl 로 만들고,
+  # Secrets Manager 확정 후 ExternalSecret 이 같은 이름으로 만든다.
+  # 만드는 주체만 바뀌므로 이 파일은 그때 손대지 않는다.
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
 
   # ⚠️ UI 에서 비밀번호를 바꾸지 말 것. Secret 과 어긋나면 sidecar 가 401 을 받아
   #    대시보드 즉시 반영이 조용히 끊긴다.
