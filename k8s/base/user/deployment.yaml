@@ -1,0 +1,175 @@
+# 이 파일은 GameHouse MSA 설계 문서(디렉터리 구조 섹션 10)를 기준으로 생성되었다.
+# 실제 값(이미지 태그, 리소스 상한, 시크릿)은 overlay 에서 환경별로 덮어쓴다.
+# user — 인증 · 프로필 · 설문 · 친구 · 알림
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: user
+    app.kubernetes.io/part-of: gamehouse
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: user
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: user
+        app.kubernetes.io/part-of: gamehouse
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8181"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      serviceAccountName: user
+      # k8s 는 네임스페이스의 Service 마다 도커 링크 호환용 환경변수를 자동 주입한다
+      # (rabbitmq Service → RABBITMQ_PORT=tcp://10.96.99.238:5672).
+      # Spring 의 relaxed binding 이 이걸 rabbitmq.port 로 읽어버려
+      # @Value("${rabbitmq.port}") int relayPort 가 int 변환에서 죽는다.
+      # 환경변수는 application.yml 보다 우선순위가 높아 조용히 덮어쓴다.
+      enableServiceLinks: false
+      # rabbitmq 등 스테이트풀 의존성보다 먼저 뜨는 걸 막기 위해
+      # 실제 기동 순서는 Spring 의 재시도(backoff)에 맡긴다 — initContainer 로
+      # 강하게 막지 않는 이유는 순서 강제가 오히려 배포 시간을 늘리기 때문이다.
+      containers:
+        - name: user
+          # 논리 이름이다. 레지스트리 좌표가 아니다 — overlays 의 images: 가 실제 주소로 바꾼다.
+          image: gamehouse-user:OVERLAY_MUST_SET
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+            - name: mgmt
+              containerPort: 8181
+          envFrom:
+            - configMapRef:
+                name: user-config
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              valueFrom:
+                configMapKeyRef:
+                  name: user-config
+                  key: SPRING_PROFILES_ACTIVE
+            # DB_URL 이 $(DB_HOST) 를 치환하려면 그보다 먼저 선언돼 있어야 한다.
+            # prod 오버레이는 이 항목의 출처를 Secret 으로 바꿔치기한다.
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: user-db-credentials
+                  key: DB_HOST
+            - name: DB_URL
+              value: "jdbc:postgresql://$(DB_HOST):$(DB_PORT)/$(DB_NAME)?currentSchema=user_svc"
+
+            - name: USER_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: user-db-credentials
+                  key: DB_USERNAME
+            - name: USER_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: user-db-credentials
+                  key: DB_PASSWORD
+
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: gamehouse-jwt
+                  key: JWT_SECRET
+
+            - name: RABBITMQ_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: rabbitmq-config
+                  key: RABBITMQ_HOST
+            - name: RABBITMQ_AMQP_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: rabbitmq-config
+                  key: RABBITMQ_AMQP_PORT
+            - name: RABBITMQ_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: RABBITMQ_USERNAME
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: RABBITMQ_PASSWORD
+
+          resources:
+            requests:
+              cpu: "150m"
+              memory: "384Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: mgmt
+            failureThreshold: 36
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: mgmt
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: mgmt
+            initialDelaySeconds: 0
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: uploads
+              mountPath: /app/uploads
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999   # 이미지의 spring 계정(uid 999) — 이름으로는 kubelet 이 검증 못 한다
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        # readOnlyRootFilesystem: true 를 켜기 위한 쓰기 지점.
+        # Spring Boot 는 내장 Tomcat 작업 디렉터리(/tmp/tomcat.<port>.<난수>)와
+        # JVM 성능 카운터(hsperfdata)를 부팅 때 /tmp 에 만든다. 업로드 여부와 무관하게
+        # 모든 서비스에 필요하며, 못 쓰면 부팅 자체가 실패한다.
+        # Pod 와 수명을 같이하지만 Tomcat 이 매번 새로 만들므로 없어져도 무방하다.
+        - name: tmp
+          emptyDir: {}
+        # ⚠️ 영속 스토리지가 아니다. Pod 가 사라지면 같이 사라지고 Pod 간 공유도 안 된다.
+        #    readOnlyRootFilesystem: true 를 켜기 위한 쓰기 지점일 뿐이다.
+        #    지금까지 쓰던 컨테이너 쓰기 레이어와 동작이 같고, 컨테이너만 재시작될 때
+        #    내용이 유지된다는 점만 낫다.
+        #    업로드 파일의 진짜 해법은 S3 전환이다
+        #    (components/aws/ingress.yaml 의 /uploads 블록 참고).
+        - name: uploads
+          emptyDir: {}
+      securityContext:
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: user

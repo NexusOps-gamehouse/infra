@@ -1,0 +1,54 @@
+# 이 파일은 GameHouse MSA 설계 문서(디렉터리 구조 섹션 10)를 기준으로 생성되었다.
+# 실제 값(이미지 태그, 리소스 상한, 시크릿)은 overlay 에서 환경별로 덮어쓴다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: riot
+  namespace: gamehouse
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: riot
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # riot 은 Ingress 로 노출하지 않는다 — user/match 등 내부 서비스만 호출한다.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: user
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: match
+      ports:
+        - protocol: TCP
+          port: 8084
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8184
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 외부 API(Riot Games / LLM 등) — 클러스터 밖이라 podSelector 로 못 막는다.
+    # 필요하면 overlay 에서 egress 방화벽(예: AWS Network Firewall)으로 더 좁힌다.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

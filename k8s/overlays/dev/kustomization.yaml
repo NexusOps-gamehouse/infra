@@ -1,0 +1,154 @@
+# dev — EKS. prod 와 같은 components/aws 를 쓰고 값만 다르다.
+#
+# 이 오버레이의 존재 이유: prod 로 가기 전 리허설이다. local(kind) 은 base 만
+# 검증한다 — ingress-nginx, in-cluster postgres, 더미 Secret 이라 ALB·IRSA·
+# External Secrets·RDS 경로를 한 줄도 밟지 않는다. 그 부분을 여기서 처음이자
+# 마지막으로 틀린다.
+#
+# prod 와 의도적으로 다른 것 (그 외는 전부 같아야 한다):
+#   - AWS 리소스 좌표: ACM/IAM ARN, ALB group.name, Secrets Manager 경로(gamehouse/dev/*)
+#   - 규모: replicas 2(prod 3), HPA 상한 낮춤, chat PDB minAvailable 1
+#   - 도메인: CORS_ALLOWED_ORIGINS
+#
+# 전제(이 트리 밖):
+#   1) dev EKS 클러스터 + AWS Load Balancer Controller + External Secrets Operator
+#      + metrics-server (EKS 기본 탑재가 아니다 — 없으면 HPA 가 <unknown> 으로 멈춘다)
+#   2) dev 전용 RDS(PostgreSQL) + user_/post_/chat_/match_/crew_ 스키마와 서비스별 최소권한 계정
+#   3) AWS Secrets Manager 에 gamehouse/dev/jwt, gamehouse/dev/rabbitmq,
+#      gamehouse/dev/riot, gamehouse/dev/db/<service>,
+#      gamehouse/dev/dockerhub 등록
+#      (db 항목은 DB_HOST / DB_USERNAME / DB_PASSWORD 세 키)
+#   4) IAM 역할 3종 + ALB 컨트롤러 역할. dev 역할은 gamehouse/dev/* 만 읽도록 좁힌다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - env-configmap.yaml
+
+components:
+  - ../../components/aws
+
+patches:
+  - path: patches/ingress.yaml
+  - path: patches/configmap-user.yaml
+  - path: patches/configmap-post.yaml
+  - path: patches/configmap-chat.yaml
+  - path: patches/configmap-match.yaml
+  - path: patches/configmap-crew.yaml
+  - path: patches/configmap-riot.yaml
+  # base 의 5432 egress 는 in-cluster postgres 를 본다 — dev/prod 는 RDS(클러스터 밖)라
+  # 매칭되지 않는다. 관리 포트 ingress 도 클러스터 안 파드만 허용해 ALB 헬스체크가 막힌다.
+  # 두 구멍을 서비스별로 ipBlock 규칙을 덧붙여 메운다.
+  - path: patches/networkpolicy-user.yaml
+    target:
+      kind: NetworkPolicy
+      name: user
+  - path: patches/networkpolicy-post.yaml
+    target:
+      kind: NetworkPolicy
+      name: post
+  - path: patches/networkpolicy-chat.yaml
+    target:
+      kind: NetworkPolicy
+      name: chat
+  - path: patches/networkpolicy-match.yaml
+    target:
+      kind: NetworkPolicy
+      name: match
+  - path: patches/networkpolicy-crew.yaml
+    target:
+      kind: NetworkPolicy
+      name: crew
+  - path: patches/replicas-user.yaml
+  - path: patches/replicas-post.yaml
+  - path: patches/replicas-chat.yaml
+  - path: patches/replicas-match.yaml
+  - path: patches/replicas-crew.yaml
+  - path: patches/replicas-riot.yaml
+  - path: patches/hpa-user.yaml
+  - path: patches/hpa-post.yaml
+  - path: patches/hpa-chat.yaml
+  - path: patches/hpa-match.yaml
+  - path: patches/hpa-crew.yaml
+  - path: patches/pdb-chat.yaml
+
+# components/aws 의 ExternalSecret 경로 `gamehouse/ENV/...` 에서 ENV 세그먼트만
+# env-configmap.yaml 의 값으로 바꾼다. delimiter/index 방식이라 data: 항목이
+# 몇 개든(jwt 1개, rabbitmq 2개, db 3개) 와일드카드 하나로 전부 처리된다 —
+# 항목이 늘어도 여기를 고칠 필요가 없다.
+replacements:
+  - source:
+      kind: ConfigMap
+      name: gamehouse-env
+      fieldPath: data.ENV
+    targets:
+      - select:
+          kind: ExternalSecret
+        fieldPaths:
+          - spec.data.*.remoteRef.key
+        options:
+          delimiter: /
+          index: 1
+
+images:
+  # 서비스마다 ECR 레포가 따로 있고, 태그는 <환경>-<커밋 SHA> 다.
+  #   develop 푸시  →  :develop 과 :dev-<sha>
+  #   main 승격     →  :main    과 :main-<sha>   (재빌드 없이 태그만 추가)
+  #
+  # 여기에는 :dev-<sha> 만 쓴다. :develop 은 이동 태그라서, 새 이미지를 올려도
+  # 이 파일이 한 글자도 안 바뀐다 → Argo CD 가 동기화할 것을 못 찾는다.
+  # 이름만 다를 뿐 :latest 와 같다.
+  #
+  # 이 값은 서비스 CI 의 repository_dispatch 를 받아 워크플로가 갱신한다.
+  # 손으로 고칠 때도 `kustomize edit set image` 는 쓰지 않는다 — 파일 전체를
+  # 재작성해서 주석이 원래 자리에서 떨어져 엉뚱한 항목을 설명하게 된다.
+  #
+  # base 가 실제 레포 대신 논리 이름(gamehouse-user 등)을 쓰는 이유는, 예전에
+  # 6개 서비스가 Docker Hub 레포 하나를 태그 접두사로 공유했기 때문이다. ECR 로
+  # 옮긴 뒤에도 논리 이름은 그대로 둔다 — 매칭 키가 바뀌면 base 도 함께 고쳐야 한다.
+  - name: gamehouse-user
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-user
+    newTag: dev-f30f0572bd5391a222aa03e6cb8453534a6ae120
+  - name: gamehouse-post
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-post
+    newTag: dev-ae83c169654673be526c0fb094c98719e60ba319
+  - name: gamehouse-chat
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-chat
+    newTag: dev-2569887c27769d4b7d2fded931ae5767695dc983
+  - name: gamehouse-match
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-match
+    newTag: dev-bb1a5da1da003c1265bac2326f6e02dcecce1768
+  - name: gamehouse-crew
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-crew
+    newTag: dev-2c8f115e6bb2eae449202e9164a2fef80066cc39
+  - name: gamehouse-riot
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-riot
+    newTag: dev-7d0de55ff26cb4deb77684bcda14619c119bb6d4
+  # rabbitmq 는 CI 가 없다 — 미들웨어라 변경이 드물어서 손으로 빌드해 푸시한다.
+  #
+  #   docker buildx build --platform linux/amd64 \
+  #     -t nexusops0713/gamehouse:rabbitmq-3-1 --push infra/rabbitmq
+  #
+  # 그래서 여기만 <환경>-<sha> 가 아니라 고정 태그이고, 레지스트리도 아직
+  # Docker Hub 다. 자동 갱신(repository_dispatch)의 서비스 허용 목록에서 뺀다.
+  #
+  # 태그 규칙이 dev-<sha> / main-<sha> 와 다른 이유:
+  #   - 브랜치·커밋 축이 의미가 없다. 내용을 정하는 건 베이스 이미지
+  #     (infra/rabbitmq/Dockerfile 의 FROM rabbitmq:3-management)와 플러그인 2개뿐이고,
+  #     dev·prod·local 이 같은 이미지를 쓴다.
+  #   - `3` 은 베이스 메이저. 4.x 로 올리면 rabbitmq-4-1 이 된다.
+  #   - `1` 은 우리 리비전. 플러그인·conf 를 건드리면 -2 로 올린다. 절대 덮어쓰지 않는다
+  #     — 덮어쓰면 롤백 대상이 사라지고, 노드 캐시 때문에 파드마다 내용이 갈린다.
+  #
+  # 베이스가 떠다니는 태그라 rabbitmq-1 과 rabbitmq-2 의 RabbitMQ 버전이 다를 수 있다.
+  # 푸시할 때 `docker buildx imagetools inspect rabbitmq:3-management` 의 다이제스트를
+  # 리비전과 함께 기록해 둔다.
+  - name: gamehouse-rabbitmq
+    newName: nexusops0713/gamehouse
+    newTag: rabbitmq-3-1
+
+labels:
+  - pairs:
+      app.kubernetes.io/environment: dev
+    includeSelectors: true

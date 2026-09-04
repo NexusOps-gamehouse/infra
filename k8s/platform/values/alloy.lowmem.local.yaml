@@ -1,0 +1,7 @@
+# 저메모리 오버라이드 — Alloy
+#   helm upgrade --install alloy grafana/alloy -n observability \
+#     -f alloy.local.yaml -f alloy.lowmem.local.yaml
+alloy:
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits:   { memory: 192Mi }

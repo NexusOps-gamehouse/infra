@@ -1,0 +1,9 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: riot
+  namespace: gamehouse
+# prod — 1개. riot 만 예외다: RateLimiter 가 프로세스 메모리 상태라 파드 수만큼
+# 라이엇 API 한도를 초과한다(base/riot/deployment.yaml 참고).
+spec:
+  replicas: 1

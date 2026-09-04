@@ -1,0 +1,8 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: match
+  namespace: gamehouse
+spec:
+  minReplicas: 2
+  maxReplicas: 8

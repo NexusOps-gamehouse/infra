@@ -1,0 +1,12 @@
+# DB_HOST 는 여기 없다 — ExternalSecret 이 AWS Secrets Manager 에서 받아온다.
+# (external-secrets/external-secret-db-post.yaml)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: post-config
+  namespace: gamehouse
+data:
+  ENV_NAME: "prod"
+  CORS_ALLOWED_ORIGINS: "https://game-duo.com"
+  SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "5"
+  SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: "1"

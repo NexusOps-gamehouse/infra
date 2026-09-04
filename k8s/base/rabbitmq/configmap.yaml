@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-config
+  namespace: gamehouse
+data:
+  RABBITMQ_HOST: "rabbitmq.gamehouse.svc.cluster.local"
+  RABBITMQ_AMQP_PORT: "5672"
+  RABBITMQ_STOMP_PORT: "61613"

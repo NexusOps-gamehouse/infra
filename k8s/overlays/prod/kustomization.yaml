@@ -1,0 +1,121 @@
+# prod — Main EKS + ALB + RDS. frontend는 S3 + CloudFront로 별도 운영한다.
+#
+# AWS 공통 Kubernetes 구성은 components/aws에서 관리하고,
+# 이 overlay에서는 Main 환경의 설정값, replicas/HPA, NetworkPolicy,
+# ExternalSecret 경로 및 ECR 이미지 등을 정의한다.
+#
+# 배포 전 주요 준비사항:
+#   1) EKS 클러스터 및 필수 Add-on/Controller 구성
+#      - metrics-server
+#      - External Secrets Operator
+#      - AWS Load Balancer Controller
+#   2) Main RDS 및 서비스별 DB Role/Schema 구성
+#   3) AWS Secrets Manager의 gamehouse/main/* Secret 구성
+#      - DB(user/post/chat/match/crew)
+#      - JWT / RabbitMQ / Riot / LLM
+#   4) External Secrets Operator는 EKS Pod Identity를 통해
+#      AWS Secrets Manager에 접근한다.
+#   5) 애플리케이션 이미지는 서비스별 Amazon ECR repository를 사용한다.
+#      최초 배포 이미지는 origin/main과 일치하는 commit SHA 태그로 고정한다.
+#
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - env-configmap.yaml
+
+components:
+  - ../../components/aws
+
+patches:
+  - path: patches/ingress.yaml
+  - path: patches/configmap-user.yaml
+  - path: patches/configmap-post.yaml
+  - path: patches/configmap-chat.yaml
+  - path: patches/configmap-match.yaml
+  - path: patches/configmap-crew.yaml
+  - path: patches/configmap-riot.yaml
+  # base 의 5432 egress 는 in-cluster postgres 를 본다 — dev/prod 는 RDS(클러스터 밖)라
+  # 매칭되지 않는다. 관리 포트 ingress 도 클러스터 안 파드만 허용해 ALB 헬스체크가 막힌다.
+  # 두 구멍을 서비스별로 ipBlock 규칙을 덧붙여 메운다.
+  - path: patches/networkpolicy-user.yaml
+    target:
+      kind: NetworkPolicy
+      name: user
+  - path: patches/networkpolicy-post.yaml
+    target:
+      kind: NetworkPolicy
+      name: post
+  - path: patches/networkpolicy-chat.yaml
+    target:
+      kind: NetworkPolicy
+      name: chat
+  - path: patches/networkpolicy-match.yaml
+    target:
+      kind: NetworkPolicy
+      name: match
+  - path: patches/networkpolicy-crew.yaml
+    target:
+      kind: NetworkPolicy
+      name: crew
+  - path: patches/replicas-user.yaml
+  - path: patches/replicas-post.yaml
+  - path: patches/replicas-chat.yaml
+  - path: patches/replicas-match.yaml
+  - path: patches/replicas-crew.yaml
+  - path: patches/replicas-riot.yaml
+  - path: patches/hpa-user.yaml
+  - path: patches/hpa-post.yaml
+  - path: patches/hpa-chat.yaml
+  - path: patches/hpa-match.yaml
+  - path: patches/hpa-crew.yaml
+  # placeholder Secret 삭제 패치는 components/aws 로 옮겼다(dev 와 공통).
+
+# components/aws 의 ExternalSecret 경로 `gamehouse/ENV/...` 에서 ENV 세그먼트만
+# env-configmap.yaml 의 값으로 바꾼다. dev 오버레이와 동일한 블록이다.
+replacements:
+  - source:
+      kind: ConfigMap
+      name: gamehouse-env
+      fieldPath: data.ENV
+    targets:
+      - select:
+          kind: ExternalSecret
+        fieldPaths:
+          - spec.data.*.remoteRef.key
+        options:
+          delimiter: /
+          index: 1
+
+images:
+  # Main EKS는 서비스별 Amazon ECR repository를 사용한다.
+  # 애플리케이션 이미지는 origin/main과 일치하는 commit SHA 태그로 고정한다.
+  - name: gamehouse-user
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-user
+    newTag: main-741dcd50482ba71beb55258972158a7bcc211425
+  - name: gamehouse-post
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-post
+    newTag: main-bbffef929e6d5f63569c5ab77b60873760b6e10f
+  - name: gamehouse-chat
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-chat
+    newTag: main-ba622c312ed0883d2546199460a077f3e7953d9b
+  - name: gamehouse-match
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-match
+    newTag: main-8b93615d72e783231a5ce91ad2abdcc7adbeeb57
+  - name: gamehouse-crew
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-crew
+    newTag: main-9eb38d9a0fa1016c13e07386ca5644a2e02184ba
+  - name: gamehouse-riot
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-riot
+    newTag: main-914ab55a7d00c98890c89503a41e290392441c5e
+
+  # RabbitMQ는 별도로 관리하는 고정 revision 이미지를 사용한다.
+  - name: gamehouse-rabbitmq
+    newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-rabbitmq
+    newTag: "3-1"
+
+labels:
+  - pairs:
+      app.kubernetes.io/environment: prod
+    includeSelectors: true

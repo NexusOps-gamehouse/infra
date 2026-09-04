@@ -1,0 +1,67 @@
+# 이 파일은 GameHouse MSA 설계 문서(디렉터리 구조 섹션 10)를 기준으로 생성되었다.
+# 실제 값(이미지 태그, 리소스 상한, 시크릿)은 overlay 에서 환경별로 덮어쓴다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: chat
+  namespace: gamehouse
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: chat
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # 외부(Ingress/ALB)에서 8080 으로 들어오는 트래픽을 허용한다.
+    # nginx-ingress(dev) 든 ALB IP-target(prod) 든 클러스터 관점에선 "어딘가에서 들어오는
+    # 8080 요청"이라 소스를 좁히기 어렵다 — 실제 경계는 인그레스 자체(경로 라우팅)와
+    # (prod) RDS/ALB 보안그룹이 담당한다. 여기서는 포트만 8083(HTTP)/8183(actuator) 로 제한한다.
+    - from: []
+      ports:
+        - protocol: TCP
+          port: 8083
+    # 클러스터 내부(Prometheus 등)의 actuator 스크레이프
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8183
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # PostgreSQL — dev 는 in-cluster postgres 파드, prod 는 RDS(클러스터 밖) 라
+    # podSelector 로 못 좁히는 경우가 많다. overlay 에서 목적지를 구체화한다.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # user 서비스 호출 (chat/client/UserClient.java)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: user
+      ports:
+        - protocol: TCP
+          port: 8081
+    # RabbitMQ — 도메인 이벤트 발행/구독 + STOMP(WS) 릴레이
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: rabbitmq
+      ports:
+        - protocol: TCP
+          port: 5672
+        - protocol: TCP
+          port: 61613

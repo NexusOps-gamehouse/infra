@@ -1,0 +1,24 @@
+# RabbitMQ 수집 — PodMonitor.
+#
+# Service 를 거치지 않고 파드를 직접 잡는다. rabbitmq 와 rabbitmq-headless 가
+# 같은 라벨이라 ServiceMonitor 로는 같은 파드를 두 번 긁는다.
+#
+# ⚠️ 파드 라벨과 '컨테이너 포트 이름'에 의존한다. base 의 StatefulSet 에서
+#    metrics:15692 포트 이름을 지우면 수집이 조용히 멈춘다.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: rabbitmq
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/part-of: gamehouse
+    release: kps
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  podMetricsEndpoints:
+    - port: metrics                  # 컨테이너 포트 '이름'. 15692, rabbitmq_prometheus 플러그인
+      path: /metrics                 # 앱(Actuator)과 달리 기본 경로
+      interval: 30s                  # 기존 EC2 구성과 동일

@@ -1,0 +1,10 @@
+# chat PDB 는 components/aws/pdb.yaml 에서 minAvailable: 2 다(prod replicas 3 기준).
+# dev 는 replicas 2 라 그대로 두면 자발적 축출이 전부 막혀 노드 드레인·업그레이드가
+# 멈춘다. 1로 낮춘다.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: chat
+  namespace: gamehouse
+spec:
+  minAvailable: 1

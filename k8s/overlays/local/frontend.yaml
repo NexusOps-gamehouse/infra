@@ -1,0 +1,138 @@
+# local 전용 — frontend Dockerfile(Nginx 기반)을 그대로 Pod 하나로 띄운다.
+# dev/prod는 S3+CloudFront로 정적 호스팅하므로 이 파일은 overlays/local에만 존재한다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
+      app.kubernetes.io/managed-by: kustomize
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: frontend
+        app.kubernetes.io/managed-by: kustomize
+    spec:
+      serviceAccountName: frontend
+      containers:
+        - name: frontend
+          image: gamehouse-frontend:OVERLAY_MUST_SET
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 5173
+
+          env:
+            # 브라우저에서는 same-origin 상대경로(/api, /ws)를 사용한다.
+            # local Ingress가 API/WebSocket 경로를 각 MSA Service로 직접 라우팅한다.
+            #
+            # 값을 비워두면 docker-entrypoint.sh가 기존 config.js를 유지한다.
+            # NGINX_RESOLVER는 별도로 지정하지 않는다.
+            # frontend entrypoint가 Pod의 /etc/resolv.conf에서 CoreDNS를 자동 감지한다.
+            #
+            # Nginx reverse proxy 기본 upstream:
+            #   user:8080
+            #   post:8080
+            #   chat:8080
+            #   match:8080
+            #   crew:8080
+            #
+            # Kubernetes Service가 위 이름과 port 8080을 제공하므로
+            # 별도 *_UPSTREAM override는 필요하지 않다.
+            - name: API_BASE_URL
+              value: ""
+            - name: WS_URL
+              value: ""
+            - name: BACKEND_ORIGIN
+              value: ""
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+      securityContext:
+        # frontend Docker 이미지의 non-root app 사용자가 UID/GID 1000을 사용한다.
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: frontend
+  namespace: gamehouse
+automountServiceAccountToken: false
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: gamehouse
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  selector:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/managed-by: kustomize
+  ports:
+    - name: http
+      port: 5173
+      targetPort: http
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend
+  namespace: gamehouse
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
+      app.kubernetes.io/managed-by: kustomize
+  policyTypes:
+    - Ingress
+  ingress:
+    - from: []
+      ports:
+        - protocol: TCP
+          port: 5173
