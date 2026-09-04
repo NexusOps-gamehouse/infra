@@ -1,5 +1,9 @@
 # main 은 RDS 다. 컴포넌트의 local 기본값(in-cluster postgres)을 덮어쓴다.
 #
+# ⚠️ RDS 엔드포인트를 여기 적지 않는다. 자격증명은 아니지만 '접속 가능한 대상 주소'라
+#    보안그룹이 잘못 열린 순간 바로 찔러볼 수 있는 값이고, 인스턴스명도 함께 드러난다.
+#    components/aws 의 ExternalSecret 들과 같은 판단이다 — Secret 에서 받는다.
+#
 # ⚠️ env 순서가 중요하다. DATA_SOURCE_URI 의 $(VAR) 는 '앞서 정의된' env 만 참조하므로
 #    PGHOST · POSTGRES_DB · PGSSLMODE 가 그보다 앞에 있어야 한다.
 #    kustomize 병합 후 순서가 유지되는지 반드시 렌더링해서 확인할 것.
@@ -15,7 +19,13 @@ spec:
         - name: postgres-exporter
           env:
             - name: PGHOST
-              value: gamehouse-main-db.cbq2o6s2kuhe.ap-northeast-2.rds.amazonaws.com
+              # 원본의 value 를 지운다. null 이 없으면 value 와 valueFrom 이 함께 남아
+              # 쿠버네티스가 거부한다. 전략적 병합은 덮어쓸 뿐 지우지 않는다.
+              value: null
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-exporter-db
+                  key: DB_HOST
             - name: PGSSLMODE
               value: require
             - name: POSTGRES_DB
