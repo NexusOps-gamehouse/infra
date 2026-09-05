@@ -109,22 +109,22 @@ images:
   # 옮긴 뒤에도 논리 이름은 그대로 둔다 — 매칭 키가 바뀌면 base 도 함께 고쳐야 한다.
   - name: gamehouse-user
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-user
-    newTag: dev-f30f0572bd5391a222aa03e6cb8453534a6ae120
+    newTag: dev-4690b4435bb08f0218db4ac2d8a2d56440f92eac
   - name: gamehouse-post
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-post
-    newTag: dev-ae83c169654673be526c0fb094c98719e60ba319
+    newTag: dev-ecf61447775e64d7ddd4628a98b348c1b421bdc2
   - name: gamehouse-chat
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-chat
-    newTag: dev-2569887c27769d4b7d2fded931ae5767695dc983
+    newTag: dev-46354c51d114bf7d1ccb32d433f1ab787bf0afdc
   - name: gamehouse-match
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-match
-    newTag: dev-bb1a5da1da003c1265bac2326f6e02dcecce1768
+    newTag: dev-4f0436bb1c3f8052478c95e0924e13c82174858f
   - name: gamehouse-crew
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-crew
-    newTag: dev-2c8f115e6bb2eae449202e9164a2fef80066cc39
+    newTag: dev-b23a4de787cc71472479d8d63119cf5291a5ab7f
   - name: gamehouse-riot
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-riot
-    newTag: dev-7d0de55ff26cb4deb77684bcda14619c119bb6d4
+    newTag: dev-7a2794116d33c4abe6fc9e1465ed9600f93c5ccd
   # rabbitmq 는 CI 가 없다 — 미들웨어라 변경이 드물어서 손으로 빌드해 푸시한다.
   #
   #   docker buildx build --platform linux/amd64 \

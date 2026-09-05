@@ -1,0 +1,77 @@
+# ---------------------------------------------------------------------------
+# prod(Main EKS) Root Application — app-of-apps
+#
+# 이 파일만 사람이 apply 한다. 최초 1회다.
+# Root 가 k8s/argocd/applications/prod 를 읽어 그 아래 Application 들을 만들고,
+# 그 Application 들이 각자 워크로드를 동기화한다.
+#
+#   사람 ──kubectl apply──> Root ──> gamehouse-prod        ──> overlays/prod
+#         (최초 1회)              └─> gamehouse-observability-main ──> overlays/observability-main
+#
+# 이후 Application 을 추가·수정할 때는 applications/prod/ 에 파일을 넣고
+# 그 kustomization.yaml 에 등록하면 된다. kubectl 을 다시 칠 필요가 없다.
+#
+# ⚠️ Argo CD 가 아직 클러스터에 없다. 그 전에는 apply 하지 않는다.
+#    apply 대상은 현재 컨텍스트가 가리키는 클러스터의 Argo CD 다.
+#    반드시 kubectl config current-context 를 먼저 확인한다.
+#
+# ⚠️ Root 자신은 GitOps 대상이 아니다. 이 파일을 고치면 kubectl apply 를 다시 쳐야
+#    한다. 부트스트랩 리소스라 어쩔 수 없고, 대신 거의 바뀌지 않는다.
+#    (같은 이유로 Argo CD 자신의 values 도 GitOps 밖에 둔다)
+# ---------------------------------------------------------------------------
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gamehouse-prod-root
+  namespace: argocd
+
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/NexusOps-gamehouse/infra.git
+
+    # prod 는 main 을 본다. develop → main PR 이 배포 승인 지점이다.
+    targetRevision: main
+
+    # ⚠️ 반드시 환경 디렉터리까지 적는다. 한 단계 위(k8s/argocd/applications)를
+    #    가리키면 Root 가 local·dev 의 Application 까지 만든다. 셋의 destination 이
+    #    전부 같아서(kubernetes.default.svc / gamehouse) local 오버레이의 더미
+    #    평문 Secret 과 in-cluster postgres 가 운영 네임스페이스에 적용된다.
+    path: k8s/argocd/applications/prod
+
+  destination:
+    server: https://kubernetes.default.svc
+
+    # 하위 Application 과 다르다.
+    #   Root       → argocd    (Application CR 을 만든다)
+    #   하위        → gamehouse (실제 워크로드를 만든다)
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      selfHeal: true
+
+      # ---------------------------------------------------------------------
+      # prune 은 false 로 둔다.
+      #
+      # true 로 켜면 git 에서 자식 Application 파일을 지웠을 때 Application CR 이
+      # 삭제된다. 그때 워크로드까지 함께 지워지는지는 자식의 finalizer 가 정한다.
+      #
+      #   자식에 resources-finalizer.argocd.argoproj.io 있음
+      #     → 그 Application 이 만든 워크로드까지 연쇄 삭제
+      #   없음 (현재 상태)
+      #     → Application CR 만 사라지고 워크로드는 클러스터에 남는다(고아)
+      #
+      # 현재 applications/ 아래 어느 파일에도 finalizer 가 없다. 즉 지금은 고아로
+      # 남는 쪽이다. 운영 중인 클러스터를 인수하는 단계에서는 이쪽이 안전하므로
+      # 그대로 둔다.
+      #
+      # 대가는 비대칭이다 — 추가·수정은 자동 반영되지만 삭제는 수동이다.
+      # 정리(cascade delete)가 필요해지면 finalizer 를 명시적으로 추가하고
+      # 이 주석을 함께 고친다.
+      # ---------------------------------------------------------------------
+      prune: false
+
+    syncOptions:
+      - RespectIgnoreDifferences=true

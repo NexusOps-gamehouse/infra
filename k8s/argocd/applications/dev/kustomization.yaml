@@ -1,0 +1,17 @@
+# dev 환경의 Argo CD Application 목록.
+#
+# Root App(k8s/argocd/root/*.yaml)이 이 디렉터리를 source 로 읽어 아래 Application 을
+# 만든다. 여기에 파일을 추가하고 resources 에 등록하면 그것으로 배포가 끝난다 —
+# kubectl apply 를 다시 칠 필요가 없다.
+#
+# ⚠️ 환경별로 디렉터리를 나눈 이유. 세 환경의 Application 은 destination 이 전부
+#    같다(kubernetes.default.svc / gamehouse). 환경마다 Argo CD 를 그 클러스터에
+#    하나씩 두기로 한 설계의 귀결이다. 그래서 Root 의 path 를 한 단계 위로 잘못
+#    적으면 Root 가 세 환경을 전부 만들고, local 오버레이(더미 평문 Secret,
+#    in-cluster postgres, frontend)가 운영 네임스페이스에 적용된다.
+#    applications/ 바로 아래에 .yaml 을 두지 않는다 — 잘못된 경로는 렌더 에러로 죽는다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - gamehouse.yaml

@@ -1,0 +1,47 @@
+# ---------------------------------------------------------------------------
+# 관측 배선(main) — Argo CD Application
+#
+# ⚠️ Argo CD 가 아직 클러스터에 없다. 그 전에는 이 파일을 apply 하지 않는다.
+#    apply 대상은 이 파일이 가리키는 클러스터 안의 Argo CD 다 — gamehouse-main 에
+#    Argo CD 를 설치한 뒤 그 컨텍스트에서 apply 한다. 컨텍스트를 확인하고 실행할 것.
+#
+# gamehouse-prod 와 분리한다. 앱 오버레이는 인프라 담당 소유라 한 Application 에
+# 묶으면 관측 변경이 앱 sync 를 기다리거나 그 반대가 된다. 정책은 prod 와 같다.
+# ---------------------------------------------------------------------------
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gamehouse-observability-main
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/NexusOps-gamehouse/infra.git
+    # prod 와 같은 이유로 main 을 본다 — develop → main PR 이 배포 승인 지점이다.
+    targetRevision: main
+    path: k8s/overlays/observability-main
+
+  destination:
+    server: https://kubernetes.default.svc
+    # 리소스마다 namespace 가 매니페스트에 박혀 있다(gamehouse / observability).
+    # 이 값은 namespace 가 없는 리소스의 기본값일 뿐이라 실제로는 쓰이지 않는다.
+    namespace: gamehouse
+
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+
+# prod 에 있는 ignoreDifferences 와 RespectIgnoreDifferences 는 여기 없다.
+# 그 예외는 HPA 가 replicas 를 바꾸기 때문인데, 이 오버레이의 Deployment 는
+# postgres-exporter 하나뿐이고 HPA 가 붙지 않는다. 예외를 둘 대상이 없다.
+#
+# ⚠️ CRD 의존이 있다. ServiceMonitor · PrometheusRule · AlertmanagerConfig 는
+#    kube-prometheus-stack 이 설치한 CRD 를 쓴다. Helm 설치가 먼저다.
+#    Helm 으로 올리는 것(kube-prometheus-stack · Loki · Alloy)은 이 Application 이
+#    관리하지 않는다 — k8s/platform/values/*.main.yaml 로 따로 다룬다.
+#
+# ⚠️ selfHeal 을 켜므로 손으로 고친 것은 되돌려진다. 알람을 급히 멈춰야 할 때
+#    PrometheusRule 을 지우는 방식은 이 아래서는 통하지 않는다.
+#    Alertmanager 의 silence 를 쓸 것 — 그것은 런타임 상태라 Argo 가 건드리지 않는다.

@@ -1,0 +1,27 @@
+# ---------------------------------------------------------------------------
+# 관측 배선 — main(EKS) 용 오버레이
+#
+# overlays/prod 와 나란히 두지만 축이 다르다. prod 는 앱 워크로드, 이쪽은 관측이다.
+# 섞지 않는 이유는 소유권이다 — 앱 오버레이는 인프라 담당이 계속 고치는 중이고,
+# 한 파일에 섞이면 서로의 변경이 서로를 막는다. 따로 두면 관측만 배포·롤백할 수 있고
+# Argo CD 를 붙일 때도 별도 Application 이 된다.
+#
+# ⚠️ Helm 으로 설치하는 것(kube-prometheus-stack · Loki · Alloy)은 여기 없다.
+#    그것들은 k8s/platform/values/*.main.yaml 이 담당한다.
+#    이 오버레이는 '배선' — ServiceMonitor · PrometheusRule · AlertmanagerConfig ·
+#    postgres-exporter · 대시보드다.
+# ---------------------------------------------------------------------------
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - externalsecret-grafana-admin.yaml
+  - externalsecret-discord-webhook.yaml
+  - externalsecret-postgres-exporter.yaml
+
+components:
+  - ../../components/observability
+
+patches:
+  - path: patches/postgres-exporter.yaml
+  - path: patches/networkpolicy-postgres-exporter.yaml
