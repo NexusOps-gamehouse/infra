@@ -14,3 +14,7 @@ data:
   CORS_ALLOWED_ORIGINS: "https://gamehouse.example.com"
   DB_PORT: "5432"
   DB_NAME: "duo"
+  # crew/client/UserClient — 닉네임 조회.
+  # 이 줄이 없으면 application.yml 기본값 localhost:8081 로 떨어져
+  # crew 가 자기 자신에게 붙으려다 실패하고 "사용자 #N" 으로 표시된다.
+  USER_SERVICE_URL: "http://user:8080"

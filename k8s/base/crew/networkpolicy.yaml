@@ -65,3 +65,12 @@ spec:
     #
     # 다른 서비스로 나가는 규칙은 없다 — crew 는 아무 서비스도 호출하지 않는다
     # (configmap.yaml 주석 참고). 호출이 생기면 여기에 대상 파드와 포트를 함께 추가한다.
+    # user 서비스 호출 (crew/client/UserClient — 닉네임 조회).
+    # ConfigMap 의 USER_SERVICE_URL 과 짝이다 — 한쪽만 있으면 동작하지 않는다.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: user
+      ports:
+        - protocol: TCP
+          port: 8081
