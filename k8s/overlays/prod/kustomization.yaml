@@ -102,7 +102,7 @@ images:
     newTag: main-ba622c312ed0883d2546199460a077f3e7953d9b
   - name: gamehouse-match
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-match
-    newTag: main-8b93615d72e783231a5ce91ad2abdcc7adbeeb57
+    newTag: main-05c027a13ea662193bf7fa3a3647d105fc46d582
   - name: gamehouse-crew
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-crew
     newTag: main-fdea4671392bb66e5f8ee679ad52aafc04748075
