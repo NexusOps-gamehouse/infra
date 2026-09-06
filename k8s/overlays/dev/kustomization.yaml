@@ -115,7 +115,7 @@ images:
     newTag: dev-324c7c8d3725563317982e66ee25fc33b9b14c34
   - name: gamehouse-chat
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-chat
-    newTag: dev-46354c51d114bf7d1ccb32d433f1ab787bf0afdc
+    newTag: dev-207b6fdca50c3d42f367cfb6873211fb7d2b5a33
   - name: gamehouse-match
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-match
     newTag: dev-b3aace8e09cb0a2bda96257261ea22a7311f98cb
