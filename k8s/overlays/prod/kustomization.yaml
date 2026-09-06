@@ -108,7 +108,7 @@ images:
     newTag: main-fdea4671392bb66e5f8ee679ad52aafc04748075
   - name: gamehouse-riot
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-riot
-    newTag: main-42d56fe9c7dd2326d2147a6abbba8e882b3dc8f4
+    newTag: main-010e5ece8e0819dd2306db5417265e0382c21319
 
   # RabbitMQ는 별도로 관리하는 고정 revision 이미지를 사용한다.
   - name: gamehouse-rabbitmq
