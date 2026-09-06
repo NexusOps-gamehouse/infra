@@ -35,9 +35,11 @@ spec:
         target:
           type: Utilization
           averageUtilization: 70
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80
+    # 메모리 지표는 두지 않는다 — JVM 에서는 제어 지표로 쓸 수 없다.
+    #   실측(2026-09-05 prod): 파드당 350Mi 로 고정. CPU 2m(트래픽 없음)일 때도 같다.
+    #   RSS 의 63%가 비힙(Metaspace·스레드 스택·Code Cache)이라 부하를 반영하지 않고,
+    #   힙 상한도 128Mi(MaxRAMPercentage 기본 25% × limits 512Mi)로 묶여 있다.
+    #   requests 384Mi 기준 임계선이 307Mi 라 기동만 해도 초과하며,
+    #   파드를 늘려도 파드당 값은 그대로여서 지표가 내려가지 않는다.
+    #   실제로 HPA 가 계속 늘리다 CPU 예약이 소진되어 파드가 24시간 Pending 이었다.
+    # 메모리는 Grafana 와 PrometheusRule 로 관측한다.
