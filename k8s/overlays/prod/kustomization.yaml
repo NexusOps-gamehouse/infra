@@ -93,7 +93,7 @@ images:
   # 애플리케이션 이미지는 origin/main과 일치하는 commit SHA 태그로 고정한다.
   - name: gamehouse-user
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-user
-    newTag: main-be3371c70bcc34ff6e3af1fffb08395481e274ff
+    newTag: main-a924e42c539cdde71f8d952ec79c7913213ef50d
   - name: gamehouse-post
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-post
     newTag: main-c504add9edfd8266d99cc16036adb1c212f39448
