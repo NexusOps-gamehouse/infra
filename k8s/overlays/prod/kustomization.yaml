@@ -99,7 +99,7 @@ images:
     newTag: main-799b7ae8951376569e1303c41f0565f8590dcf44
   - name: gamehouse-chat
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-chat
-    newTag: main-c13d5f9242c54e2a65e28a100b4379dfe773a643
+    newTag: main-ebdba5aef61f2f92655e8912c9c408e411042c00
   - name: gamehouse-match
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-match
     newTag: main-caa7c743192e31c4080b0c7e17fc9762ab79a32b
