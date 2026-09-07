@@ -1,0 +1,70 @@
+# main 에서는 kube-prometheus-stack 기본 규칙 중 34개도 Discord 로 보낸다.
+# 선별 근거는 알람-이관-분류표.md 5절.
+#
+# ⚠️ AlertmanagerConfig 는 CRD 라 목록 병합 키가 없다. 이 패치가 route 를 통째로
+#    대체하므로 기존 route 5개를 여기 다시 적어야 한다. 빠뜨리면 조용히 사라진다.
+#
+# ⚠️ Alertmanager 는 한 route 안에서 OR 을 못 쓴다. 그래서 origin 용과
+#    기본 규칙용을 별도 route 로 둔다.
+#
+# ⚠️ Node 3개(Memory·Filesystem)가 포함돼 있다. 원래는 CloudWatch 담당인데
+#    CloudWatch 에 노드 디스크·메모리 경보가 아직 없다. 만들면 여기서 뺀다.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: gamehouse
+  namespace: observability
+spec:
+  route:
+    groupBy: ["alertname"]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    receiver: "null"
+    routes:
+      # 상시 발화라 보내지 않는다. Watchdog 은 알람 경로 생존 확인용이다.
+      - matchers:
+          - name: alertname
+            value: Watchdog
+        receiver: "null"
+      - matchers:
+          - name: alertname
+            value: InfoInhibitor
+        receiver: "null"
+      # 우리 규칙이 더 구체적이므로 먼저 둔다
+      - matchers:
+          - name: origin
+            value: gamehouse
+          - name: alertname
+            value: RiotApiKeyRejected
+        receiver: discord
+        groupWait: 30s
+        groupInterval: 30m
+        repeatInterval: 6h
+      - matchers:
+          - name: origin
+            value: gamehouse
+          - name: severity
+            value: critical
+        receiver: discord
+        groupWait: 30s
+        groupInterval: 5m
+        repeatInterval: 1h
+      - matchers:
+          - name: origin
+            value: gamehouse
+          - name: severity
+            value: warning
+        receiver: discord
+        groupWait: 5m
+        groupInterval: 30m
+        repeatInterval: 24h
+      # kube-prometheus-stack 기본 규칙 중 선별한 34개
+      - matchers:
+          - name: alertname
+            matchType: "=~"
+            value: "KubePodCrashLooping|KubePodNotReady|KubeContainerWaiting|KubeDeploymentGenerationMismatch|KubeDeploymentReplicasMismatch|KubeDeploymentRolloutStuck|KubeStatefulSetReplicasMismatch|KubeDaemonSetNotScheduled|KubeDaemonSetRolloutStuck|KubeNodeNotReady|KubeNodeUnreachable|KubeNodePressure|KubePersistentVolumeFillingUp|KubePersistentVolumeErrors|KubeJobFailed|KubeHpaMaxedOut|KubeHpaReplicasMismatch|TargetDown|PrometheusNotIngestingSamples|PrometheusRuleFailures|PrometheusOperatorNotReady|PrometheusOperatorReconcileErrors|PrometheusOperatorRejectedResources|PrometheusErrorSendingAlertsToAnyAlertmanager|PrometheusNotConnectedToAlertmanagers|PrometheusNotificationQueueRunningFull|PrometheusTSDBCompactionsFailing|AlertmanagerFailedToSendAlerts|AlertmanagerFailedReload|AlertmanagerClusterDown|AlertmanagerClusterCrashlooping|NodeMemoryHighUtilization|NodeFilesystemAlmostOutOfSpace|NodeFilesystemSpaceFillingUp"
+        receiver: discord
+        groupWait: 30s
+        groupInterval: 10m
+        repeatInterval: 4h
