@@ -26,6 +26,7 @@ components:
 patches:
   - path: patches/postgres-exporter.yaml
   - path: patches/networkpolicy-postgres-exporter.yaml
+  - path: patches/alertmanagerconfig.yaml
 
 configMapGenerator:
   # EKS 전용 대시보드. 컴포넌트가 아니라 여기 두는 이유는 로컬(kind)과 값이 다르기
