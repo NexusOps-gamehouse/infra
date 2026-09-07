@@ -18,6 +18,7 @@ resources:
   - externalsecret-grafana-admin.yaml
   - externalsecret-discord-webhook.yaml
   - externalsecret-postgres-exporter.yaml
+  - ingress-grafana.yaml
 
 components:
   - ../../components/observability

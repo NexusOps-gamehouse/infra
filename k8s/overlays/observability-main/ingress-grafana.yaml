@@ -1,0 +1,42 @@
+# Grafana 를 grafana.game-duo.com 으로 연다.
+#
+# 앱 Ingress 와 같은 group.name 을 쓰므로 ALB 가 새로 생기지 않는다(비용 0).
+# 리스너·인증서·scheme 은 그룹 전체 설정이라 앱이 이미 잡아둔 것을 그대로 쓴다.
+#
+# ⚠️ group.order 를 앱보다 낮게 둔다.
+#    앱 규칙은 host 조건 없이 /api/... 경로만 보므로, 순위를 잡지 않으면
+#    grafana.game-duo.com/api/users 같은 요청이 user 서비스로 간다.
+#    Grafana 도 /api/ 를 쓰기 때문에 실제로 부딪힌다.
+#    우리 규칙은 host 가 일치할 때만 걸리므로 앱 트래픽에는 영향이 없다.
+#
+# ⚠️ certificate-arn 은 적지 않는다. ALB Controller 가 host 이름으로 ACM 에서
+#    맞는 인증서를 찾아 붙인다. 인증서를 재발급해도 이 파일을 고칠 필요가 없다.
+#
+# ⚠️ healthcheck-path 는 대상 그룹 단위라 우리 것만 따로 잡힌다.
+#    앱의 /actuator/health 를 그대로 두면 Grafana 가 404 를 돌려줘 계속 비정상이 된다.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana
+  namespace: observability
+  annotations:
+    alb.ingress.kubernetes.io/group.name: gamehouse-prod
+    alb.ingress.kubernetes.io/group.order: "-1"
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}, {"HTTP":80}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/healthcheck-path: /api/health
+spec:
+  ingressClassName: alb
+  rules:
+    - host: grafana.game-duo.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kps-grafana
+                port:
+                  number: 80
