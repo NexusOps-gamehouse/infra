@@ -26,3 +26,20 @@ components:
 patches:
   - path: patches/postgres-exporter.yaml
   - path: patches/networkpolicy-postgres-exporter.yaml
+
+configMapGenerator:
+  # EKS 전용 대시보드. 컴포넌트가 아니라 여기 두는 이유는 로컬(kind)과 값이 다르기
+  # 때문이다 — 디스크 mountpoint 가 로컬은 /var, EKS 는 / 다.
+  #
+  # ⚠️ disableNameSuffixHash 를 켠다. 기본값은 내용 해시를 이름에 붙이는 것이라
+  #    대시보드를 고칠 때마다 옛 ConfigMap 이 남고, sidecar 가 둘 다 읽어
+  #    같은 uid 의 대시보드가 두 벌이 된다.
+  - name: grafana-dashboard-gamehouse-eks-overview
+    namespace: gamehouse
+    files:
+      - dashboards/gamehouse-eks-overview.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+        app.kubernetes.io/part-of: gamehouse
