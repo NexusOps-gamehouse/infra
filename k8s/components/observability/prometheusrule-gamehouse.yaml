@@ -157,7 +157,6 @@ spec:
             description: >-
               이미지와 로그가 쌓인 것이 1순위 원인입니다.
               꽉 차면 파드가 뜨지 않고 Prometheus 수집도 멈춥니다.
-              절대값보다 기울기를 봅니다 — 하루 5%씩 오르면 뭔가 새로 쌓이기 시작한 것입니다.
 
         # 원본: "호스트 메모리 여유 부족" (< 200MB, t3.small 2GB 전제)
         #
@@ -200,9 +199,8 @@ spec:
           annotations:
             summary: '{{ $labels.job }} 수집이 15분째 끊겼습니다 (서비스는 정상)'
             description: >-
-              이 job 이 담당하는 패널이 비어 보이게 됩니다. 사용자 영향은 없으므로 급하지 않지만,
+              이 job 이 담당하는 패널이 비어 보입니다. 사용자 영향은 없으므로 급하지 않지만,
               방치하면 진짜 장애 때 볼 데이터가 없습니다.
-              등급을 warning 으로 둔 것은 그래서입니다.
 
         # 신규 — 기존 스택에는 로그 수집이 없어 이 알람도 없었다.
         #
@@ -221,12 +219,11 @@ spec:
             origin: gamehouse
             severity: warning
           annotations:
-            summary: 'Alloy 가 로그를 버리고 있습니다 (사유: {{ $labels.reason }})'
+            summary: '로그가 Loki 에 남지 않습니다 (사유: {{ $labels.reason }})'
             description: >-
-              지금 이 순간의 로그가 Loki 에 남지 않고 있습니다. 장애 조사 때 그 구간이 비어 있게 됩니다.
-              reason=rate_limited 또는 stream_limited 면 Loki 쪽 한도,
-              queue_is_full 이면 Alloy 가 전송 속도를 못 따라가는 것입니다.
-              kubectl -n observability logs ds/alloy 로 확인합니다.
+              지금 들어오는 로그가 버려지고 있어 장애 조사 때 이 구간이 빕니다.
+              rate_limited·stream_limited 는 Loki 한도, queue_is_full 은 Alloy 전송 지연,
+              ingester_error 는 Loki 수신 실패입니다.
 
         # 신규 — 위 ObservabilityScrapeDown 이 못 잡는 경우를 메운다.
         # Alloy 파드가 통째로 사라지면 up{job="alloy"} 시계열도 사라져 == 0 이 성립하지 않는다.
@@ -242,4 +239,3 @@ spec:
             description: >-
               DaemonSet 이 지워졌거나 ServiceMonitor 가 빠진 상태입니다.
               kubectl -n observability get ds alloy 와 servicemonitor 를 확인합니다.
-              이 알람이 필요한 이유는 up == 0 규칙이 '시계열이 사라진 경우'를 못 잡기 때문입니다.

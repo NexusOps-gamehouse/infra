@@ -218,7 +218,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(count_over_time({namespace=\"gamehouse\"} [5m]))",
+          "expr": "sum(count_over_time({namespace=\"gamehouse\"} [$__range])) or vector(0)",
           "queryType": "instant"
         }
       ],
