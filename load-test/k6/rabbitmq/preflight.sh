@@ -206,11 +206,20 @@ get_publisher_token() {
     return 1
   fi
 
+  # tokens.json 은 공용 시드(load-test/seed/data.example/tokens.json)와 같은
+  # **배열** 형식이다: [{email, token}, ...]
+  #
+  # ⚠️ 배열에 .publisher 를 바로 태우면 jq 가 "Cannot index array with string"
+  #    으로 죽는다. // 는 오류를 넘기지 못하므로 type 을 먼저 가른다.
+  #
+  # 발행자는 prepare.sh 가 만든 첫 계정이다. rabbit.js 도 기본값으로 [0] 만
+  # 쓰므로(채팅방 대조가 로그인 사용자 기준이라) 여기서도 [0] 을 본다.
   jq -r '
-    .publisher.token //
-    .publisherToken //
-    .token //
-    empty
+    if type == "array" then
+      (.[0].token // empty)
+    else
+      (.publisher.token // .publisherToken // .token // empty)
+    end
   ' "$TOKEN_FILE" 2>/dev/null | head -n 1
 }
 
