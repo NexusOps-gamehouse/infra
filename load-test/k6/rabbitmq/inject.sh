@@ -26,6 +26,7 @@ DATA_DIR="$SCRIPT_DIR/seed/data"
 
 NAMESPACE="${NAMESPACE:-gamehouse}"
 RABBIT_POD="${RABBIT_POD:-rabbitmq-0}"
+RABBIT_STS_SVC="${RABBIT_STS_SVC:-rabbitmq}"
 CHAT_DEPLOYMENT="${CHAT_DEPLOYMENT:-chat}"
 ROOMS_URL="${ROOMS_URL:-http://gamehouse.local/api/chat/rooms}"
 
@@ -192,13 +193,46 @@ rabbitmq_kill() {
   echo "Namespace : $NAMESPACE"
   echo "Pod       : $RABBIT_POD"
 
-  note INJECT "rabbitmq-kill pod=$RABBIT_POD delete 직전"
+  # ⚠️ 삭제 직후 곧바로 wait 를 걸면 안 된다. StatefulSet 이라 Pod 이름이
+  #    같아서, 삭제가 전파되기 전의 **옛 Pod** 를 보고 즉시 통과한다.
+  #    실제로 그렇게 해서 다운타임이 36초인데 0초로 기록된 적이 있다.
+  #
+  #    Pod UID 를 먼저 기억했다가 **바뀐 뒤에** Ready 를 기다린다. UID 는
+  #    Pod 마다 새로 발급되므로 같은 이름이어도 새 Pod 인지 구분된다.
+  local old_uid
+  old_uid="$(kubectl -n "$NAMESPACE" get pod "$RABBIT_POD" \
+    -o jsonpath='{.metadata.uid}' 2>/dev/null || true)"
+
+  note INJECT "rabbitmq-kill pod=$RABBIT_POD uid=${old_uid:0:8} delete 직전"
   kubectl -n "$NAMESPACE" delete pod "$RABBIT_POD" --wait=false
 
-  echo "재생성 대기..."
+  echo "새 Pod 대기..."
+  local n=0 new_uid=""
+  while [ "$n" -lt "${RABBIT_REPLACE_TIMEOUT:-120}" ]; do
+    new_uid="$(kubectl -n "$NAMESPACE" get pod "$RABBIT_POD" \
+      -o jsonpath='{.metadata.uid}' 2>/dev/null || true)"
+    [ -n "$new_uid" ] && [ "$new_uid" != "$old_uid" ] && break
+    sleep 1; n=$((n + 1))
+  done
+  if [ -z "$new_uid" ] || [ "$new_uid" = "$old_uid" ]; then
+    echo "중단: 새 Pod 가 ${RABBIT_REPLACE_TIMEOUT:-120}초 안에 생기지 않았다." >&2
+    note NOTE "rabbitmq-kill 새 Pod 대기 실패"
+    exit 1
+  fi
+
+  echo "Ready 대기..."
   kubectl -n "$NAMESPACE" wait --for=condition=Ready "pod/$RABBIT_POD" \
     --timeout="${RABBIT_READY_TIMEOUT:-300s}"
-  note RECOVER "rabbitmq Ready pod=$RABBIT_POD"
+
+  # Endpoints 까지 봐야 실제로 트래픽을 받는다. Ready 와 몇 초 차이가 난다.
+  n=0
+  while [ "$n" -lt 60 ]; do
+    [ "$(kubectl -n "$NAMESPACE" get endpoints "$RABBIT_STS_SVC" \
+      -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | wc -w | tr -d ' ')" != "0" ] && break
+    sleep 1; n=$((n + 1))
+  done
+
+  note RECOVER "rabbitmq Ready pod=$RABBIT_POD uid=${new_uid:0:8}"
 }
 
 case "${1:-}" in
