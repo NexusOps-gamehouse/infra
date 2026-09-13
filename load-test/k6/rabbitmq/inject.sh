@@ -5,6 +5,7 @@
 #   ./inject.sh baseline              기준선 (context · Pod · 큐)
 #   ./inject.sh rabbitmq-queues       큐 상태
 #   ./inject.sh rabbitmq-consumed     채팅방 수 (발행 계정 기준)
+#   ./inject.sh roundtrip             이벤트 왕복 확인 (글 = 방 = chatRoomId)
 #
 #   ALLOW_FAULT=1 ./inject.sh chat-down       Chat consumer 중단 → 큐 적체
 #   ALLOW_FAULT=1 ./inject.sh chat-up         원래 replica 로 복구
@@ -102,6 +103,71 @@ rabbitmq_consumed() {
     | jq 'if type=="object" then (.content // .items // []) else . end | length')"
   echo "$rooms"
   note SNAPSHOT "chat-rooms=$rooms"
+}
+
+# 이벤트 왕복 확인.
+#
+# 이 흐름은 두 번 오간다. 채팅방 수만 세면 앞의 절반만 검증한 것이다.
+#
+#   ① post  발행: PostCreatedEvent
+#   ② chat  소비 → 채팅방 생성
+#   ③ chat  발행: ChatRoomCreatedEvent   ← 여기부터 안 보고 있었다
+#   ④ post  소비 → posts.chat_room_id 채움
+#
+# 세 숫자가 같아야 왕복 전체가 무사한 것이다.
+#   [RMQ-TEST] 글 수 == 채팅방 수 == chatRoomId 가 채워진 글 수
+#
+# ⚠️ PostDto 의 chatRoomId 는 "내가 멤버인 경우에만" 실린다. 발행자가 방장이라
+#    발행 계정 토큰으로 조회하면 채워져 나온다. 다른 계정으로 보면 전부 null 이다.
+roundtrip() {
+  local token="${1:-}"
+  if [[ -z "$token" ]]; then
+    [[ -f "$DATA_DIR/tokens.json" ]] || {
+      echo "중단: 토큰이 없다. ./seed/prepare.sh 를 먼저 실행한다." >&2; exit 2; }
+    token="$(jq -r '.[0].token' "$DATA_DIR/tokens.json")"
+  fi
+
+  local prefix="[RMQ-TEST]"
+  [[ -f "$DATA_DIR/meta.json" ]] &&     prefix="$(jq -r '.titlePrefix // "[RMQ-TEST]"' "$DATA_DIR/meta.json")"
+
+  local base="${BASE_URL:-http://gamehouse.local}"
+  local posts=0 filled=0 page=0
+
+  while [ "$page" -lt 50 ]; do
+    local body items n
+    body="$(curl -s --max-time 30 "$base/api/posts?page=${page}&size=100" \
+      -H "Authorization: Bearer $token" || echo '[]')"
+    items="$(jq -c 'if type=="object" then (.content // .items // []) else . end' \
+      <<<"$body" 2>/dev/null || echo '[]')"
+    n="$(jq 'length' <<<"$items" 2>/dev/null || echo 0)"
+    [ "$n" -eq 0 ] && break
+
+    posts=$(( posts + $(jq --arg p "$prefix" \
+      '[.[] | select((.title // "") | startswith($p))] | length' <<<"$items") ))
+    filled=$(( filled + $(jq --arg p "$prefix" \
+      '[.[] | select((.title // "") | startswith($p)) | select(.chatRoomId != null)] | length' \
+      <<<"$items") ))
+
+    [ "$n" -lt 100 ] && break
+    page=$(( page + 1 ))
+  done
+
+  # ⚠️ head 로 자르면 안 된다. rabbitmq_consumed 는 수치를 찍은 뒤 timeline 에도
+  #    기록하는데, head 가 파이프를 닫으면 그 쓰기가 SIGPIPE 로 죽고 pipefail
+  #    이 실패로 잡아 set -e 가 스크립트를 통째로 끝낸다(출력 한 줄 없이).
+  local rooms rooms_raw
+  rooms_raw="$(rabbitmq_consumed "$token" 2>/dev/null || true)"
+  rooms="$(printf '%s' "$rooms_raw" | sed -n '1p')"
+
+  printf '  %-26s %s\n' "[RMQ-TEST] 글 수" "$posts"
+  printf '  %-26s %s\n' "채팅방 수" "${rooms:-?}"
+  printf '  %-26s %s\n' "chatRoomId 채워진 글" "$filled"
+  if [ "$posts" = "$filled" ]; then
+    echo "  → 왕복 정상 (③④ 까지 완료)"
+  else
+    echo "  → ⚠️ 왕복 미완: $(( posts - filled ))건이 chatRoomId 없음"
+  fi
+  note SNAPSHOT "roundtrip posts=$posts rooms=${rooms:-?} filled=$filled"
 }
 
 baseline() {
@@ -239,6 +305,7 @@ case "${1:-}" in
   baseline)          baseline ;;
   rabbitmq-queues)   rabbitmq_queues; note SNAPSHOT "queues 조회" ;;
   rabbitmq-consumed) rabbitmq_consumed "${2:-}" ;;
+  roundtrip)         roundtrip "${2:-}" ;;
   rabbitmq-kill)     rabbitmq_kill ;;
   chat-down)         chat_down ;;
   chat-up)           chat_up ;;
