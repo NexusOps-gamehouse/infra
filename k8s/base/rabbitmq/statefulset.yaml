@@ -28,6 +28,31 @@ spec:
         prometheus.io/port: "15692"
     spec:
       serviceAccountName: rabbitmq
+      # EBS를 다시 마운트할 때 fsGroup 이 .erlang.cookie 에 그룹 권한을 더하면
+      # RabbitMQ가 보안상 기동을 거부한다. 볼륨 루트가 이미 gid 999면 재귀 권한
+      # 보정을 건너뛰고, 아래 initContainer가 쿠키만 owner-only(0600)로 되돌린다.
+      initContainers:
+        - name: rabbitmq-cookie-permissions
+          image: gamehouse-rabbitmq:OVERLAY_MUST_SET
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              cookie=/var/lib/rabbitmq/.erlang.cookie
+              if [ -f "$cookie" ]; then
+                chmod 600 "$cookie"
+              fi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
       containers:
         - name: rabbitmq
           # 논리 이름이다. 레지스트리 좌표가 아니다 — overlays 의 images: 가 실제 주소로 바꾼다.
@@ -84,6 +109,7 @@ spec:
               drop: ["ALL"]
       securityContext:
         fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
   volumeClaimTemplates:
