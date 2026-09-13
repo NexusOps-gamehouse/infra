@@ -80,9 +80,13 @@ echo
 
 # --- 1. 접두사가 붙은 글을 모은다 -----------------------------------------
 # 서버가 page size 를 100 으로 제한하므로 페이지를 넘겨 가며 읽는다.
+# ⚠️ 상한이 있다. 50페이지 × 100건 = 5,000건이 한 번에 찾을 수 있는 최대다.
+#    로컬에서 9,506건이 쌓였을 때 5,000건만 잡혔다. 회차를 여러 번 돌리면
+#    남은 글이 누적되므로, 한 번 돌리고 끝내지 말고 "0건" 이 나올 때까지
+#    반복 실행한다(아래 안내가 남은 수를 알려준다).
 ids='[]'
 page=0
-while [ "$page" -lt 50 ]; do
+while [ "$page" -lt "${CLEANUP_MAX_PAGES:-50}" ]; do
   body=$(http "$BASE_URL/api/posts?page=${page}&size=100" \
     -H "Authorization: Bearer $first_token")
   items=$(jq -c 'if type=="object" then (.content // .items // []) else . end' \
@@ -100,6 +104,12 @@ done
 
 total=$(jq 'length' <<<"$ids")
 echo "찾은 글     : ${total}건"
+
+# 상한에 닿았으면 더 남아 있다는 뜻이다. 조용히 끝나면 "다 지웠다" 고 오해한다.
+cap=$(( ${CLEANUP_MAX_PAGES:-50} * 100 ))
+if [ "$total" -ge "$cap" ]; then
+  echo "⚠️ 상한 ${cap}건에 닿았다. 더 남아 있을 수 있으니 이 스크립트를 다시 실행한다." >&2
+fi
 
 if [ "$total" -eq 0 ]; then
   echo "지울 것이 없다."
