@@ -23,9 +23,9 @@ GameHouse는 7개 레포로 나뉘어 있다. 이 레포는 그중 **서비스�
 이 레포는 "그 서비스들이 **어디서 어떻게 도는가**"만 설명한다.
 `Deployment`, `Service`, `Ingress`, `HPA`, `NetworkPolicy`, `ExternalSecret` 은 전부 여기 있다.
 
-**환경은 3개다.**
+환경은 3개다.
 
-| 환경 | 클러스터 | 트래픽 | DB | 시크릿 |
+| 환경 | 클러스터 | 트래픽 입구 | DB | 시크릿 |
 |---|---|---|---|---|
 | `local` | kind | ingress-nginx | in-cluster PostgreSQL | 평문 Secret |
 | `dev` | EKS | ALB | RDS | External Secrets |
@@ -74,7 +74,7 @@ Argo CD 수동 sync를 따로 두지 않았다. 브랜치 분리가 이미 승�
 
 ```
 사람 ──kubectl apply(최초 1회)──> gamehouse-prod-root
-                                    ├─> gamehouse-prod              ──> overlays/prod
+                                    ├─> gamehouse-prod               ──> overlays/prod
                                     └─> gamehouse-observability-main ──> overlays/observability-main
 ```
 
@@ -83,33 +83,97 @@ Argo CD 수동 sync를 따로 두지 않았다. 브랜치 분리가 이미 승�
 
 `prune: false` 다. Git에서 파일을 지워도 클러스터 리소스는 남는다(고아). 삭제는 수동이다.
 
-**GitOps 밖에 있는 것들**
-
-`kube-prometheus-stack`, `Loki`, `Alloy`, `Argo CD 자신` 은 Helm 으로 직접 설치·업그레이드한다.
-values 는 `k8s/platform/values/*.main.yaml` 에 있고, 고쳤으면 `helm upgrade` 를 직접 쳐야 반영된다.
+`kube-prometheus-stack` · `Loki` · `Alloy` · `Argo CD 자신` 은 이 흐름 밖에 있다. Helm 으로 직접 설치·업그레이드하고, values 는 `k8s/platform/values/*.main.yaml` 에 있다.
 
 ---
 
-## 3. 디렉터리 지도
+## 3. 매니페스트 조립도
 
-루트 README는 **어디에 무엇이 있는지**까지만 말한다. 실행 방법과 절차는 하위 README가 갖고 있다.
+환경마다 매니페스트를 복사해 두지 않는다. **한 벌을 세 겹으로 덮어쓴다.**
+그래서 `k8s/` 아래 디렉터리는 종류별이 아니라 **겹(layer)별**로 나뉘어 있다.
 
-| 경로 | 무엇이 있나 |
+```mermaid
+flowchart LR
+    subgraph L1["① 공통 — 환경과 무관"]
+        B["k8s/base<br/>Deployment · Service · SA<br/>ConfigMap · HPA · NetworkPolicy<br/>6서비스 + RabbitMQ"]
+    end
+
+    subgraph L2["② 재사용 조각 — kustomize Component"]
+        CA["components/aws<br/>ALB Ingress · ExternalSecret<br/>gp3 StorageClass · PDB"]
+        CO["components/observability<br/>ServiceMonitor · PrometheusRule<br/>AlertmanagerConfig · 대시보드"]
+    end
+
+    subgraph L3["③ 환경별 값 — Overlay"]
+        OP["overlays/prod<br/>replicas · HPA 임계 · 도메인<br/>ACM ARN · ECR 이미지 태그"]
+        OO["overlays/observability-main<br/>Grafana Ingress · Discord Webhook<br/>postgres-exporter"]
+    end
+
+    B --> OP
+    CA --> OP
+    CO --> OO
+
+    OP --> A1["Argo CD<br/>gamehouse-prod"]
+    OO --> A2["Argo CD<br/>gamehouse-observability-main"]
+```
+
+**층마다 담는 것이 정해져 있다.**
+
+| 층 | 여기 들어간다 | 여기 안 들어간다 |
+|---|---|---|
+| `base/` | 어느 환경에서도 똑같은 것. 컨테이너 포트, 프로브 경로, 서비스 간 통신 규칙 | 이미지 태그, 클라우드에 종속된 것 |
+| `components/aws/` | **EKS 위에서 돌기 위한 구조** — ALB Ingress, External Secrets, PDB, gp3 | 환경별 **값** — ARN, 도메인, replicas, Secrets Manager 경로 |
+| `components/observability/` | 관측 **배선** — 무엇을 긁어갈지, 언제 알람을 울릴지 | Prometheus·Loki·Alloy 자체 (그건 Helm) |
+| `overlays/<env>/` | 그 환경에서만 다른 **값** | 다른 환경도 쓸 구조 (그건 component로 올린다) |
+
+### user 서비스 하나가 prod에 뜨기까지
+
+```
+base/user/                       Deployment(image: gamehouse-user, 태그 없음) · Service
+                                 ConfigMap · HPA · NetworkPolicy · 평문 db-secret
+        │
+        ▼
+components/aws                   평문 db-secret 을 $patch: delete 로 제거
+                                 → ExternalSecret 이 같은 이름으로 다시 만들고
+                                   AWS Secrets Manager 값으로 채운다
+                                 + ALB 헬스체크용 Service 패치, PDB
+        │
+        ▼
+overlays/prod                    configmap-user  : 운영 환경값
+                                 hpa-user        : 상시 개수 · 확장 임계
+                                 networkpolicy-user : RDS(클러스터 밖) egress 허용
+                                 images          : ECR 주소 + main-<sha> 태그 확정
+                                 replacements    : ExternalSecret 경로의 ENV 세그먼트 치환
+        │
+        ▼
+kustomize build                  네임스페이스 gamehouse 의 최종 Deployment
+```
+
+`base` 의 평문 Secret 은 지우지 않고 남겨 둔다. **local 이 그걸 쓰기 때문**이다.
+dev/prod 는 `components/aws` 가 그것을 삭제하고 ExternalSecret 으로 갈아 끼운다.
+그래서 Argo CD 가 소유하는 것은 `ExternalSecret` 이고, 그것이 만들어낸 `Secret` 은 소유하지 않는다.
+
+### 오버레이 4개의 조합
+
+| 오버레이 | base | component | 특징 |
+|---|---|---|---|
+| `local` | ○ | observability | `postgres.yaml` · `frontend.yaml` · nginx Ingress 를 직접 추가. 평문 Secret 그대로 |
+| `dev` | ○ | aws | ALB + RDS + External Secrets |
+| `prod` | ○ | aws | dev 와 구조는 같고 값만 운영 것 |
+| `observability-main` | ✕ | observability | 앱과 **분리**된 별도 Application |
+
+관측을 `prod` 에 섞지 않은 이유는 **소유권**이다. 한 파일에 섞이면 앱 변경과 관측 변경이 서로를 막는다. 따로 두면 관측만 배포·롤백할 수 있고, Argo CD 에서도 별도 Application 이 된다.
+
+### 이 조립에 들어가지 않는 것
+
+| 경로 | 무엇 |
 |---|---|
 | `eks/main-cluster.yaml` | eksctl 클러스터 정의. 노드 타입 · 개수 · 서브넷 배치 |
-| `k8s/base/` | 7개 워크로드(6서비스 + rabbitmq)의 환경 무관 매니페스트 |
-| `k8s/components/aws/` | dev·prod 공통 AWS 조각 — ExternalSecret, gp3 StorageClass, PDB, ALB Ingress, 평문 Secret 삭제 패치 |
-| `k8s/components/observability/` | ServiceMonitor · PrometheusRule · AlertmanagerConfig · 공통 대시보드 |
-| `k8s/overlays/local` `dev` `prod` `observability-main` | 환경별 차이. replicas · HPA · ConfigMap · NetworkPolicy · **이미지 태그** |
-| `k8s/argocd/` | Root App 1개 + 환경별 Application |
-| `k8s/platform/values/` | Helm 차트 values (Prometheus · Loki · Alloy · Argo CD) |
-| `docker-compose*.yml` | EKS 이전의 단일 EC2 구성. 로컬 스택과 부하 테스트용으로 남아 있다 |
-| `observability/` | compose 용 Grafana 프로비저닝 · Prometheus 설정 |
+| `k8s/platform/values/` | Helm 차트 values — Prometheus · Loki · Alloy · Argo CD |
+| `docker-compose*.yml` · `observability/` | EKS 이전의 단일 EC2 구성. 로컬 스택과 부하 테스트용으로 남아 있다 |
 | `scripts/` | kind 기동 · 시크릿 주입 · 스케일 · Argo CD 설치 등 로컬 보조 스크립트 |
 | `load-test/` | k6 시나리오 · 시딩 · N+1 프로브 · 결과 |
-| `rabbitmq/Dockerfile` | 플러그인을 얹은 RabbitMQ 이미지 |
-| `.github/workflows/` | `ci-cd.yml` (compose 검증 · 시크릿 스캔) · `k8s-ci.yml` (매니페스트 검증) · `image-tag-writeback.yml` |
-| `kind-config.yaml` `.env.example` `.env.k8s.local.example` | 로컬 기동 입력값 |
+| `rabbitmq/Dockerfile` | 플러그인을 얹은 RabbitMQ 이미지. CI 가 없어 태그를 손으로 올린다 |
+| `.github/workflows/` | `ci-cd.yml` · `k8s-ci.yml` · `image-tag-writeback.yml` |
 
 **하위 README**
 
@@ -117,40 +181,3 @@ values 는 `k8s/platform/values/*.main.yaml` 에 있고, 고쳤으면 `helm upgr
 - [`load-test/README.md`](load-test/README.md) — k6 회차 실행, Grafana 연동, N+1 프로브, 회차 직후 점검
 
 ---
-
-## 4. 이거 고치려면 여기
-
-무엇을 바꾸고 싶은지로 찾는 표다.
-
-| 하고 싶은 일 | 여기 |
-|---|---|
-| **상시 Pod 개수 바꾸기** | `k8s/overlays/prod/patches/hpa-<svc>.yaml` 의 `minReplicas` |
-| 최대 Pod 개수 · 확장 기준 | 같은 파일의 `maxReplicas` · `metrics` |
-| riot 의 Pod 개수 | `k8s/overlays/prod/patches/replicas-riot.yaml` (riot 은 HPA 가 없다) |
-| 서비스 환경변수 | `k8s/overlays/prod/patches/configmap-<svc>.yaml` |
-| 컨테이너 리소스 request/limit | `k8s/base/<svc>/deployment.yaml` |
-| **새 시크릿 추가** | ① AWS Secrets Manager 에 `gamehouse/main/<이름>` 생성 → ② `k8s/components/aws/external-secrets/external-secret-<이름>.yaml` 추가 → ③ `components/aws/kustomization.yaml` 에 등록. base 에 평문 Secret 이 있으면 `components/aws/patches/delete-secret-*.yaml` 도 함께 |
-| **알람 규칙 추가** | `k8s/components/observability/prometheusrule-gamehouse.yaml` |
-| 알림이 어디로 갈지 | `k8s/overlays/observability-main/patches/alertmanagerconfig.yaml` |
-| Discord Webhook 주소 | `k8s/overlays/observability-main/externalsecret-discord-webhook.yaml` |
-| 메트릭 수집 대상 추가 | `k8s/components/observability/servicemonitor-<svc>.yaml` |
-| 대시보드 | 공통은 `components/observability/dashboards/`, EKS 전용은 `overlays/observability-main/dashboards/` |
-| 도메인 · 경로 라우팅 | `k8s/overlays/prod/patches/ingress.yaml` (ALB 공통 설정은 `components/aws/ingress.yaml`) |
-| Grafana 외부 노출 | `k8s/overlays/observability-main/ingress-grafana.yaml` — 앱과 **같은 ALB** 를 쓴다(`group.name` 동일). `/api/` 경로가 겹쳐서 `group.order: -1` 이 필요하다 |
-| 노드 타입 · 개수 · 서브넷 | `eks/main-cluster.yaml` |
-| Prometheus 보존기간 · Loki · Alloy | `k8s/platform/values/*.main.yaml` → 고친 뒤 `helm upgrade` 직접 실행 (GitOps 대상 아님) |
-| **새 서비스 추가** | ① `k8s/base/<svc>/` 생성 + `base/kustomization.yaml` 등록 → ② `overlays/*/patches/` 에 configmap · replicas · hpa · networkpolicy → ③ `overlays/*/kustomization.yaml` 의 `patches` · `images` 에 등록 → ④ `components/aws/external-secrets/` 에 DB 시크릿 → ⑤ `components/observability/servicemonitor-<svc>.yaml` → ⑥ `.github/workflows/image-tag-writeback.yml` 의 허용 서비스 목록에 추가 |
-| 이미지 태그 수동 주입 | `image-tag-writeback` 워크플로를 `workflow_dispatch` 로 실행 (`service` · `sha` 40자리 · `env`) |
-| RabbitMQ 이미지 갱신 | `rabbitmq/Dockerfile` 수정 후 수동 빌드 → `overlays/*/kustomization.yaml` 의 `gamehouse-rabbitmq` `newTag` 를 직접 올린다 (CI 없음) |
-| kustomize 버전 | `k8s-ci.yml` 과 `image-tag-writeback.yml` **두 파일을 함께** (현재 `5.8.1`, Argo CD repo-server 에 박힌 값과 맞춘 것) |
-| 로컬에서 띄워보기 | [`k8s/README.md`](k8s/README.md) |
-| 부하 테스트 | [`load-test/README.md`](load-test/README.md) |
-
----
-
-## 주의
-
-- **`main` 브랜치에 `image-tag-writeback.yml` 이 없으면 배포가 조용히 멈춘다.** `repository_dispatch` 는 기본 브랜치에서만 워크플로를 찾고, 못 찾으면 `204` 를 돌려준다. 실패로도 보이지 않는다.
-- **Root Application 자신은 GitOps 대상이 아니다.** `k8s/argocd/root/prod.yaml` 을 고치면 `kubectl apply` 를 다시 쳐야 한다.
-- **Argo CD 는 HPA 가 있는 5개 Deployment 의 `/spec/replicas` 를 무시한다.** Git 의 `replicas-<svc>.yaml` 값을 바꿔도 반영되지 않는다. 상시 개수를 바꾸려면 HPA 의 `minReplicas` 를 고쳐야 한다.
-- **`applications` 경로는 환경 디렉터리까지 적어야 한다.** 한 단계 위를 가리키면 Root 가 local·dev Application 까지 만들고, 셋의 destination 이 같아서 local 의 평문 Secret 과 in-cluster postgres 가 운영 네임스페이스에 적용된다.
