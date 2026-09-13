@@ -17,6 +17,24 @@ ROOMS_URL="${ROOMS_URL:-$BASE_URL/api/chat/rooms}"
 
 FAILURES=0
 
+# EKS 회차는 단순히 현재 context가 맞는지 확인하는 데서 끝내면 안 된다. 작업 중 다른
+# 터미널이 current-context를 바꾸면 뒤의 모든 kubectl 조회가 다른 클러스터를 보게 된다.
+# 두 스위치가 함께 주어졌을 때만 명시 context를 모든 호출에 강제한다.
+KUBECTL=(kubectl)
+EKS_REQUESTED=0
+if [[ "${ALLOW_EKS_FAULT:-0}" == "1" || -n "${EKS_CONTEXT:-}" ]]; then
+  EKS_REQUESTED=1
+  if [[ "${ALLOW_EKS_FAULT:-0}" != "1" || -z "${EKS_CONTEXT:-}" ]]; then
+    echo "중단: EKS preflight에는 ALLOW_EKS_FAULT=1 과 EKS_CONTEXT를 함께 준다." >&2
+    exit 2
+  fi
+  KUBECTL+=(--context "$EKS_CONTEXT")
+fi
+
+kube() {
+  "${KUBECTL[@]}" "$@"
+}
+
 pass() {
   printf '[PASS] %s\n' "$*"
 }
@@ -52,24 +70,24 @@ retry() {
 check_context() {
   local ctx
 
-  if ! ctx="$(kubectl config current-context 2>/dev/null)"; then
-    fail "Kubernetes context를 읽을 수 없음"
-    return
-  fi
-
-  if [[ "$ctx" == kind-* ]]; then
-    pass "Kubernetes context: $ctx"
-  elif [[ "${ALLOW_EKS_FAULT:-0}" == "1" && -n "${EKS_CONTEXT:-}" && "$ctx" == "$EKS_CONTEXT" ]]; then
-    # inject.sh 와 같은 두 겹 조건이다. 여기만 느슨하면 사전 점검을 통과하고
-    # 정작 주입에서 막히거나, 반대로 점검이 막아 회차를 못 연다.
+  if (( EKS_REQUESTED )); then
+    ctx="$EKS_CONTEXT"
+    if ! kube get namespace "$NAMESPACE" >/dev/null 2>&1; then
+      fail "운영 명시 context에 접근할 수 없음: $ctx"
+      return
+    fi
     pass "Kubernetes context (운영 명시): $ctx"
+  elif ! ctx="$(kube config current-context 2>/dev/null)"; then
+    fail "Kubernetes context를 읽을 수 없음"
+  elif [[ "$ctx" == kind-* ]]; then
+    pass "Kubernetes context: $ctx"
   else
     fail "kind-* context가 아님: $ctx"
   fi
 }
 
 check_cluster_access() {
-  if retry 3 2 kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+  if retry 3 2 kube get namespace "$NAMESPACE" >/dev/null 2>&1; then
     pass "Kubernetes API / namespace 접근: $NAMESPACE"
   else
     fail "Kubernetes API 또는 namespace 접근 실패: $NAMESPACE"
@@ -80,7 +98,7 @@ check_statefulset() {
   local desired ready
 
   if ! desired="$(
-    kubectl -n "$NAMESPACE" get sts "$RABBIT_STS" \
+    kube -n "$NAMESPACE" get sts "$RABBIT_STS" \
       -o jsonpath='{.spec.replicas}' 2>/dev/null
   )"; then
     fail "RabbitMQ StatefulSet 조회 실패: $RABBIT_STS"
@@ -88,7 +106,7 @@ check_statefulset() {
   fi
 
   ready="$(
-    kubectl -n "$NAMESPACE" get sts "$RABBIT_STS" \
+    kube -n "$NAMESPACE" get sts "$RABBIT_STS" \
       -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true
   )"
   ready="${ready:-0}"
@@ -104,7 +122,7 @@ check_rabbit_pod() {
   local ready
 
   ready="$(
-    kubectl -n "$NAMESPACE" get pod "$RABBIT_POD" \
+    kube -n "$NAMESPACE" get pod "$RABBIT_POD" \
       -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || true
   )"
 
@@ -120,17 +138,17 @@ check_deployment() {
   local desired ready available
 
   desired="$(
-    kubectl -n "$NAMESPACE" get deployment "$deployment" \
+    kube -n "$NAMESPACE" get deployment "$deployment" \
       -o jsonpath='{.spec.replicas}' 2>/dev/null || true
   )"
 
   ready="$(
-    kubectl -n "$NAMESPACE" get deployment "$deployment" \
+    kube -n "$NAMESPACE" get deployment "$deployment" \
       -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true
   )"
 
   available="$(
-    kubectl -n "$NAMESPACE" get deployment "$deployment" \
+    kube -n "$NAMESPACE" get deployment "$deployment" \
       -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true
   )"
 
@@ -170,7 +188,7 @@ check_queue() {
   local consumers
 
   if ! output="$(
-    kubectl -n "$NAMESPACE" exec "$RABBIT_POD" -- \
+    kube -n "$NAMESPACE" exec "$RABBIT_POD" -- \
       rabbitmqctl list_queues \
       name messages_ready messages_unacknowledged consumers durable \
       2>/dev/null

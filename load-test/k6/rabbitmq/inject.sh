@@ -29,13 +29,35 @@ NAMESPACE="${NAMESPACE:-gamehouse}"
 RABBIT_POD="${RABBIT_POD:-rabbitmq-0}"
 RABBIT_STS_SVC="${RABBIT_STS_SVC:-rabbitmq}"
 CHAT_DEPLOYMENT="${CHAT_DEPLOYMENT:-chat}"
-ROOMS_URL="${ROOMS_URL:-http://gamehouse.local/api/chat/rooms}"
+BASE_URL="${BASE_URL:-http://gamehouse.local}"
+ROOMS_URL="${ROOMS_URL:-$BASE_URL/api/chat/rooms}"
 
 mkdir -p "$RESULT_DIR"
 
 note() { "$SCRIPT_DIR/timeline.sh" -t "$1" "${@:2}"; }
 
-current_context() { kubectl config current-context; }
+# EKS 회차는 current-context가 우연히 맞는지에 의존하지 않는다. 두 스위치가 모두
+# 주어진 경우, 조회와 주입을 포함한 모든 kubectl 호출에 그 context를 강제한다.
+KUBECTL=(kubectl)
+EKS_REQUESTED=0
+if [[ "${ALLOW_EKS_FAULT:-0}" == "1" || -n "${EKS_CONTEXT:-}" ]]; then
+  EKS_REQUESTED=1
+  if [[ "${ALLOW_EKS_FAULT:-0}" != "1" || -z "${EKS_CONTEXT:-}" ]]; then
+    echo "중단: EKS 실행에는 ALLOW_EKS_FAULT=1 과 EKS_CONTEXT를 함께 준다." >&2
+    exit 2
+  fi
+  KUBECTL+=(--context "$EKS_CONTEXT")
+fi
+
+kube() { "${KUBECTL[@]}" "$@"; }
+
+current_context() {
+  if (( EKS_REQUESTED )); then
+    printf '%s\n' "$EKS_CONTEXT"
+  else
+    kubectl config current-context
+  fi
+}
 
 require_safe_context() {
   local ctx
@@ -71,7 +93,7 @@ require_fault_opt_in() {
 # --- 조회 -----------------------------------------------------------------
 
 rabbitmq_queues() {
-  kubectl -n "$NAMESPACE" exec "$RABBIT_POD" -- \
+  kube -n "$NAMESPACE" exec "$RABBIT_POD" -- \
     rabbitmqctl list_queues \
       name messages_ready messages_unacknowledged consumers durable
 }
@@ -143,7 +165,7 @@ roundtrip() {
   local prefix="[RMQ-TEST]"
   [[ -f "$DATA_DIR/meta.json" ]] &&     prefix="$(jq -r '.titlePrefix // "[RMQ-TEST]"' "$DATA_DIR/meta.json")"
 
-  local base="${BASE_URL:-http://gamehouse.local}"
+  local base="$BASE_URL"
   local posts=0 filled=0 page=0
 
   while [ "$page" -lt 50 ]; do
@@ -186,9 +208,9 @@ roundtrip() {
 baseline() {
   echo "===== CONTEXT ====="; current_context
   echo; echo "===== PODS ====="
-  kubectl -n "$NAMESPACE" get pods -o wide
+  kube -n "$NAMESPACE" get pods -o wide
   echo; echo "===== RABBITMQ STS ====="
-  kubectl -n "$NAMESPACE" get sts rabbitmq
+  kube -n "$NAMESPACE" get sts rabbitmq
   echo; echo "===== QUEUES ====="
   rabbitmq_queues
   echo; echo "===== CHAT ROOMS ====="
@@ -206,16 +228,16 @@ chat_down() {
   require_fault_opt_in
 
   local before
-  before="$(kubectl -n "$NAMESPACE" get deploy "$CHAT_DEPLOYMENT" \
+  before="$(kube -n "$NAMESPACE" get deploy "$CHAT_DEPLOYMENT" \
     -o jsonpath='{.spec.replicas}')"
   : "${before:=1}"
   echo "$before" > "$RESULT_DIR/chat-replicas.before"
   echo "복구할 replica 수를 저장했다: $before"
 
-  kubectl -n "$NAMESPACE" scale deployment "$CHAT_DEPLOYMENT" --replicas=0
+  kube -n "$NAMESPACE" scale deployment "$CHAT_DEPLOYMENT" --replicas=0
   # resource 종류를 명시한다. 예전 버전은 종류가 빠져 있어 대기가 성립하지
   # 않았고, 오류를 || true 로 삼켜서 Pod 가 살아 있어도 다음 단계로 갔다.
-  kubectl -n "$NAMESPACE" wait --for=delete pod \
+  kube -n "$NAMESPACE" wait --for=delete pod \
     -l "app.kubernetes.io/name=$CHAT_DEPLOYMENT" \
     --timeout="${CHAT_DELETE_TIMEOUT:-180s}"
 
@@ -243,8 +265,8 @@ chat_up() {
   [ -f "$RESULT_DIR/chat-replicas.before" ] && \
     before="$(cat "$RESULT_DIR/chat-replicas.before")"
 
-  kubectl -n "$NAMESPACE" scale deployment "$CHAT_DEPLOYMENT" --replicas="$before"
-  kubectl -n "$NAMESPACE" rollout status "deployment/$CHAT_DEPLOYMENT" \
+  kube -n "$NAMESPACE" scale deployment "$CHAT_DEPLOYMENT" --replicas="$before"
+  kube -n "$NAMESPACE" rollout status "deployment/$CHAT_DEPLOYMENT" \
     --timeout="${CHAT_READY_TIMEOUT:-300s}"
 
   # consumer 가 다시 붙었는지 확인한다. Pod 가 Ready 라도 AMQP 재연결까지는
@@ -279,16 +301,16 @@ rabbitmq_kill() {
   #    Pod UID 를 먼저 기억했다가 **바뀐 뒤에** Ready 를 기다린다. UID 는
   #    Pod 마다 새로 발급되므로 같은 이름이어도 새 Pod 인지 구분된다.
   local old_uid
-  old_uid="$(kubectl -n "$NAMESPACE" get pod "$RABBIT_POD" \
+  old_uid="$(kube -n "$NAMESPACE" get pod "$RABBIT_POD" \
     -o jsonpath='{.metadata.uid}' 2>/dev/null || true)"
 
   note INJECT "rabbitmq-kill pod=$RABBIT_POD uid=${old_uid:0:8} delete 직전"
-  kubectl -n "$NAMESPACE" delete pod "$RABBIT_POD" --wait=false
+  kube -n "$NAMESPACE" delete pod "$RABBIT_POD" --wait=false
 
   echo "새 Pod 대기..."
   local n=0 new_uid=""
   while [ "$n" -lt "${RABBIT_REPLACE_TIMEOUT:-120}" ]; do
-    new_uid="$(kubectl -n "$NAMESPACE" get pod "$RABBIT_POD" \
+    new_uid="$(kube -n "$NAMESPACE" get pod "$RABBIT_POD" \
       -o jsonpath='{.metadata.uid}' 2>/dev/null || true)"
     [ -n "$new_uid" ] && [ "$new_uid" != "$old_uid" ] && break
     sleep 1; n=$((n + 1))
@@ -300,13 +322,13 @@ rabbitmq_kill() {
   fi
 
   echo "Ready 대기..."
-  kubectl -n "$NAMESPACE" wait --for=condition=Ready "pod/$RABBIT_POD" \
+  kube -n "$NAMESPACE" wait --for=condition=Ready "pod/$RABBIT_POD" \
     --timeout="${RABBIT_READY_TIMEOUT:-300s}"
 
   # Endpoints 까지 봐야 실제로 트래픽을 받는다. Ready 와 몇 초 차이가 난다.
   n=0
   while [ "$n" -lt 60 ]; do
-    [ "$(kubectl -n "$NAMESPACE" get endpoints "$RABBIT_STS_SVC" \
+    [ "$(kube -n "$NAMESPACE" get endpoints "$RABBIT_STS_SVC" \
       -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | wc -w | tr -d ' ')" != "0" ] && break
     sleep 1; n=$((n + 1))
   done
