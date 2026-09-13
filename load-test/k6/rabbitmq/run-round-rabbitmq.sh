@@ -41,6 +41,28 @@ OUT="results/EKS-RMQ-$STAMP"
 mkdir -p "$OUT"
 
 kube() { kubectl --context "$CTX" -n "$NS" "$@"; }
+
+# [RMQ-TEST] 글 수와 chatRoomId 채워진 수만 센다.
+#
+# ⚠️ /api/chat/rooms 는 부르지 않는다. 그쪽은 방 하나당 user 로 HTTP 를 한 번씩
+#    부르므로(ChatService.toRoomDto) 방이 쌓일수록 판정이 대상을 흔든다.
+#    /api/posts 는 authorsOf 가 distinct 로 묶어 페이지당 user 호출이 1회다.
+count_posts() {
+  local token page=0 posts=0 filled=0 body items n
+  token="$(jq -r '.[0].token' seed/data/tokens.json)"
+  while [ "$page" -lt 60 ]; do
+    body="$(curl -s --max-time 30 "$BASE_URL/api/posts?page=${page}&size=100" \
+      -H "Authorization: Bearer $token" || echo '{}')"
+    items="$(jq -c '(.items // .content // [])' <<<"$body" 2>/dev/null || echo '[]')"
+    n="$(jq 'length' <<<"$items" 2>/dev/null || echo 0)"
+    [ "$n" -eq 0 ] && break
+    posts=$(( posts + $(jq '[.[]|select((.title//"")|startswith("[RMQ-TEST]"))]|length' <<<"$items") ))
+    filled=$(( filled + $(jq '[.[]|select((.title//"")|startswith("[RMQ-TEST]"))|select(.chatRoomId!=null)]|length' <<<"$items") ))
+    [ "$n" -lt 100 ] && break
+    page=$(( page + 1 ))
+  done
+  printf '%s %s\n' "$posts" "$filled"
+}
 mark() { ./timeline.sh -t "$1" "${@:2}"; }
 say()  { printf '\n\033[1m▶ [%s] %s\033[0m\n' "$(date '+%H:%M:%S')" "$*"; }
 
@@ -199,10 +221,78 @@ mark MARK "RMQ 단독 회차 종료"
 kube exec "$POD" -- rabbitmqctl list_queues name messages_ready messages_unacknowledged consumers \
   > "$OUT/post-queues.txt" 2>&1 || true
 
+# ---------------------------------------------------------------------------
+# 10. 집계 — 방 없는 글을 뺄셈으로 구한다
+#
+# 글은 커밋 시점에 확정되고, 채팅방은 그 뒤 비동기로 생긴다. 그래서 두 수를
+# 비교하면 "커밋은 됐는데 발행이 안 된 글" 이 나온다. 이벤트가 안 나갔으니
+# 방도 없다.
+#
+#   조치 전  발행 실패 → 트랜잭션 롤백 → 글이 안 남음 → 차이 0
+#   조치 후  커밋 뒤 발행 → 글은 남음               → 차이 = 방 없는 글
+#
+# 로컬 4회차에서 이 뺄셈과 DB 조인 실측이 정확히 일치했다(0/0/36/38).
+# ---------------------------------------------------------------------------
+say "집계"
+read -r POSTS FILLED <<<"$(count_posts)"
+SUMMARY="$(ls -1 "$OUT"/*-summary.json 2>/dev/null | tail -1)"
+PUBLISHED=0; REQS=0; FAILED=0
+if [ -n "$SUMMARY" ]; then
+  PUBLISHED="$(jq -r '.metrics.rmq_published.count // 0' "$SUMMARY")"
+  REQS="$(jq -r '.metrics.http_reqs.count // 0' "$SUMMARY")"
+  FAILED="$(jq -r '.metrics.rmq_publish_failed.count // 0' "$SUMMARY")"
+fi
+ORPHAN=$(( POSTS - PUBLISHED ))
+
+{
+  printf 'k6 발행 성공\t%s\n' "$PUBLISHED"
+  printf 'k6 발행 실패\t%s\n' "$FAILED"
+  printf 'k6 총 요청\t%s\n'   "$REQS"
+  printf '실제 글 수\t%s\n'   "$POSTS"
+  printf 'chatRoomId 채움\t%s\n' "$FILLED"
+  printf '방 없는 글(뺄셈)\t%s\n' "$ORPHAN"
+} | tee "$OUT/tally.tsv"
+
+if [ "$POSTS" -gt 0 ]; then
+  printf '  2홉 역참조 성공률  %.1f%%\n' "$(echo "scale=3; 100*$FILLED/$POSTS" | bc)"
+fi
+[ "$ORPHAN" -gt 0 ] && echo "  ⚠️ 방 없는 글 ${ORPHAN}건 — 커밋 뒤 발행이 실패했다" \
+                    || echo "  방 없는 글 없음 — 발행 실패가 롤백으로 처리됐다"
+
+# ---------------------------------------------------------------------------
+# 11. chat 소비 실패 확인
+#
+# 뺄셈이 못 잡는 경우가 하나 있다 — 발행은 성공했는데 chat 이 소비에 실패한
+# 경우다. RabbitEventBridge 가 예외를 삼키고 메시지를 버리므로 큐도 0 이 되고
+# 글 수도 정상이다. 그때는 chat 로그에만 흔적이 남는다.
+# ---------------------------------------------------------------------------
+say "chat 소비 실패 확인 (Loki)"
+pkill -f "port-forward.*13100" 2>/dev/null || true
+kubectl --context "$CTX" -n observability port-forward svc/loki 13100:3100 >/dev/null 2>&1 &
+LOKI_PID=$!
+sleep 3
+now=$(date +%s); start=$(( now - 1800 ))
+curl -s --max-time 30 -G 'http://localhost:13100/loki/api/v1/query_range' \
+  --data-urlencode '{namespace="gamehouse", app="chat"} |~ "이벤트 처리 실패|이벤트가 아닌 메시지"' \
+  --data-urlencode "start=${start}000000000" --data-urlencode "end=${now}000000000" \
+  --data-urlencode 'limit=200' 2>/dev/null \
+  | jq -r '.data.result[]? | .values[] | [(.[0]|tonumber/1e9|todate), (.[1]|gsub("\\s+";" ")|.[0:140])] | @tsv' \
+  | sort > "$OUT/chat-consume-errors.tsv" || true
+kill "$LOKI_PID" 2>/dev/null || true
+cnt="$(wc -l < "$OUT/chat-consume-errors.tsv" | tr -d ' ')"
+if [ "$cnt" -gt 0 ]; then
+  echo "  ⚠️ chat 소비 실패 ${cnt}건 — 뺄셈으로 안 잡히는 유실이 있다"
+  head -3 "$OUT/chat-consume-errors.tsv" | sed 's/^/     /'
+else
+  echo "  chat 소비 실패 없음 — 뺄셈 결과를 그대로 믿어도 된다"
+fi
+
 say "완료 — $OUT"
 echo
 echo "  k6 요약   : $OUT/*-summary.json"
 echo "  커넥션 풀 : $OUT/pool.csv"
 echo "  큐        : $OUT/queue.tsv"
 echo "  스레드 덤프: $OUT/threaddump.txt"
+echo "  집계      : $OUT/tally.tsv"
+echo "  chat 오류 : $OUT/chat-consume-errors.tsv"
 echo "  시각      : results/timeline.log"
