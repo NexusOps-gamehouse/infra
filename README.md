@@ -6,7 +6,7 @@ GameHouse의 **실행 환경**을 담는 레포. 서비스 코드는 여기 없�
 
 ## 1. 좌표
 
-GameHouse는 7개 레포로 나뉘어 있다. 이 레포는 그중 **서비스가 아닌 유일한 레포**다.
+GameHouse는 여러 레포로 나뉘어 있다. 이 레포는 그중 **애플리케이션이 아닌 유일한 레포**다.
 
 | 레포 | 맡은 일 |
 |---|---|
@@ -17,7 +17,9 @@ GameHouse는 7개 레포로 나뉘어 있다. 이 레포는 그중 **서비스�
 | `gamehouse-crew` | 함께한 기록 · 하우스 추천 |
 | `gamehouse-riot` | Riot API 연동 |
 | `gamehouse-common` | 6개 서비스가 공유하는 이벤트 계약 |
+| `frontend` | React SPA |
 | **`infra`** | **매니페스트 · GitOps · 관측 · 부하 테스트** |
+| `backend` | 보관 — 레포를 나누기 전의 모노레포 |
 
 서비스 레포는 "이 서비스가 무엇을 하는가"를 설명한다.
 이 레포는 "그 서비스들이 **어디서 어떻게 도는가**"만 설명한다.
@@ -152,9 +154,19 @@ kustomize build                  네임스페이스 gamehouse 의 최종 Deploym
 dev/prod 는 `components/aws` 가 그것을 삭제하고 ExternalSecret 으로 갈아 끼운다.
 그래서 Argo CD 가 소유하는 것은 `ExternalSecret` 이고, 그것이 만들어낸 `Secret` 은 소유하지 않는다.
 
-**하위 README**
+### 이 조립에 들어가지 않는 것
 
-- [`k8s/README.md`](k8s/README.md) — 환경 3종 비교, kind 기동, 반복 개발, 매니페스트 검증, 이미지 주입, 정리
-- [`load-test/README.md`](load-test/README.md) — k6 회차 실행, Grafana 연동, N+1 프로브, 회차 직후 점검
+| 경로 | 무엇 |
+|---|---|
+| `eks/main-cluster.yaml` | eksctl 클러스터 정의. 노드 타입 · 개수 · 서브넷 배치 |
+| `k8s/platform/values/` | Helm 차트 values — Prometheus · Loki · Alloy · Argo CD |
+| `docker-compose*.yml` · `observability/` | EKS 이전의 단일 EC2 구성. 로컬 스택과 부하 테스트용으로 남아 있다 |
+| `scripts/` | kind 기동 · 시크릿 주입 · 스케일 등 로컬 보조 스크립트 |
+| `load-test/` | k6 시나리오 · 시딩 · N+1 프로브 |
 
 ---
+
+## 더 보기
+
+- [`k8s/README.md`](k8s/README.md) — 환경 3종 비교, kind 기동, 반복 개발, 매니페스트 검증, 이미지 주입
+- [`load-test/README.md`](load-test/README.md) — k6 회차 실행, Grafana 연동, N+1 프로브, 회차 직후 점검
