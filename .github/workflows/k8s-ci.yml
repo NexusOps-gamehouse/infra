@@ -223,11 +223,39 @@ jobs:
           # base 가 논리 이름 대신 실제 레포명(nexusops0713/gamehouse)을 쓰면
           # 서비스 4개의 매칭 이름이 전부 같아져, images: 항목 하나가 나머지를
           # 덮어쓴다. kustomize 는 경고도 에러도 내지 않는다.
-          # 서비스마다 이미지가 달라야 하므로 중복이 곧 이 사고다.
+          # 서비스마다 **주 컨테이너** 이미지는 달라야 하므로 중복이 곧 이 사고다.
+          # initContainer는 권한 보정·마이그레이션처럼 본 컨테이너와 같은 이미지를
+          # 의도적으로 재사용할 수 있으므로 이 검사에서 제외한다.
           dup=$(
 
-            grep -E '^[[:space:]]+image:' "$R" \
-              | sed 's/^[[:space:]]*image:[[:space:]]*//' \
+            awk '
+              function indent(line) {
+                match(line, /^[[:space:]]*/)
+                return RLENGTH
+              }
+
+              /^[[:space:]]+initContainers:[[:space:]]*$/ {
+                in_init = 1
+                init_indent = indent($0)
+                next
+              }
+
+              /^[[:space:]]+containers:[[:space:]]*$/ {
+                in_init = 0
+                next
+              }
+
+              # YAML 목록 항목("- command:")은 부모 initContainers 와 같은
+              # 들여쓰기를 쓴다. 목록 항목은 블록 종료가 아니므로 제외한다.
+              in_init && $0 ~ /^[[:space:]]*[^#[:space:]-]/ && indent($0) <= init_indent {
+                in_init = 0
+              }
+
+              !in_init && /^[[:space:]]+image:[[:space:]]*/ {
+                sub(/^[[:space:]]*image:[[:space:]]*/, "")
+                print
+              }
+            ' "$R" \
               | sort \
               | uniq -d
 
@@ -235,7 +263,7 @@ jobs:
 
           if [ -n "$dup" ]; then
 
-            echo "::error::${OVERLAY}: 여러 워크로드가 같은 이미지를 가리킨다 (images: 덮어쓰기 의심)"
+            echo "::error::${OVERLAY}: 여러 워크로드의 주 컨테이너가 같은 이미지를 가리킨다 (images: 덮어쓰기 의심)"
             echo "$dup"
             fail=1
 
