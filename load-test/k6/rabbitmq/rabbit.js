@@ -141,6 +141,11 @@ export default function () {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${tokenFor()}`,
     },
+    // 90초. k6 기본값 60초를 쓰면 Spring 의 connection-timeout 기본값 60초와
+    // 겹쳐서, 60초에 끊긴 요청이 **앱이 포기한 것인지 k6 가 끊은 것인지**
+    // 구분되지 않는다. 지난 회차의 "최대 60,000ms" 가 정확히 그 상태였다.
+    // 조치 전후 회차에서 같은 값을 써야 비교가 성립한다.
+    timeout: __ENV.RMQ_TIMEOUT || '90s',
   });
 
   const ok = check(res, { '글 작성 2xx': isOk(SCENARIO.S5) });

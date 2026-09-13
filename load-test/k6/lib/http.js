@@ -95,6 +95,7 @@ export const connErrorRps = new Trend('lt_conn_error_rps');
  * @param {string} [opts.path]  경로변수가 있으면 넘긴다. 없으면 ENDPOINT 기본값
  * @param {any}    [opts.body]  POST 본문
  * @param {object} [opts.headers]
+ * @param {string} [opts.timeout] 예: '90s'. 생략하면 k6 기본값 60초
  */
 export function request(scenarioKey, opts = {}) {
   const ep = ENDPOINT[scenarioKey];
@@ -108,6 +109,13 @@ export function request(scenarioKey, opts = {}) {
     // 이 시나리오에서 '정상' 인 상태코드. http_req_failed 의 판정 기준이 된다.
     responseCallback: CALLBACK[scenarioKey],
   };
+
+  // 요청 제한 시간. 안 주면 k6 기본값(60초)이 그대로 쓰인다.
+  //
+  // ⚠️ 앱이 스스로 포기하는 지점을 보려면 **앱의 타임아웃보다 길게** 줘야 한다.
+  //    Spring 의 rabbitmq connection-timeout 기본값이 60초라 k6 기본값과 똑같아서,
+  //    60초에 끊긴 요청이 앱이 포기한 것인지 k6 가 끊은 것인지 구분되지 않는다.
+  if (opts.timeout) params.timeout = opts.timeout;
 
   const res = ep.method === 'POST'
     ? http.post(url, opts.body ?? null, params)
