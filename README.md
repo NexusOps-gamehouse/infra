@@ -152,29 +152,6 @@ kustomize build                  네임스페이스 gamehouse 의 최종 Deploym
 dev/prod 는 `components/aws` 가 그것을 삭제하고 ExternalSecret 으로 갈아 끼운다.
 그래서 Argo CD 가 소유하는 것은 `ExternalSecret` 이고, 그것이 만들어낸 `Secret` 은 소유하지 않는다.
 
-### 오버레이 4개의 조합
-
-| 오버레이 | base | component | 특징 |
-|---|---|---|---|
-| `local` | ○ | observability | `postgres.yaml` · `frontend.yaml` · nginx Ingress 를 직접 추가. 평문 Secret 그대로 |
-| `dev` | ○ | aws | ALB + RDS + External Secrets |
-| `prod` | ○ | aws | dev 와 구조는 같고 값만 운영 것 |
-| `observability-main` | ✕ | observability | 앱과 **분리**된 별도 Application |
-
-관측을 `prod` 에 섞지 않은 이유는 **소유권**이다. 한 파일에 섞이면 앱 변경과 관측 변경이 서로를 막는다. 따로 두면 관측만 배포·롤백할 수 있고, Argo CD 에서도 별도 Application 이 된다.
-
-### 이 조립에 들어가지 않는 것
-
-| 경로 | 무엇 |
-|---|---|
-| `eks/main-cluster.yaml` | eksctl 클러스터 정의. 노드 타입 · 개수 · 서브넷 배치 |
-| `k8s/platform/values/` | Helm 차트 values — Prometheus · Loki · Alloy · Argo CD |
-| `docker-compose*.yml` · `observability/` | EKS 이전의 단일 EC2 구성. 로컬 스택과 부하 테스트용으로 남아 있다 |
-| `scripts/` | kind 기동 · 시크릿 주입 · 스케일 · Argo CD 설치 등 로컬 보조 스크립트 |
-| `load-test/` | k6 시나리오 · 시딩 · N+1 프로브 · 결과 |
-| `rabbitmq/Dockerfile` | 플러그인을 얹은 RabbitMQ 이미지. CI 가 없어 태그를 손으로 올린다 |
-| `.github/workflows/` | `ci-cd.yml` · `k8s-ci.yml` · `image-tag-writeback.yml` |
-
 **하위 README**
 
 - [`k8s/README.md`](k8s/README.md) — 환경 3종 비교, kind 기동, 반복 개발, 매니페스트 검증, 이미지 주입, 정리
