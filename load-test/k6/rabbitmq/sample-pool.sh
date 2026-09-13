@@ -25,6 +25,17 @@ OUT="${1:?사용법: $0 <출력.csv>}"
 PORT="${POOL_PORT:-18182}"
 INTERVAL="${POOL_INTERVAL:-2}"
 
+# 필요한 지표만 받는다. 전체 응답은 150 KB 라, 2초 간격 10분이면 44 MB 를
+# 끌어온다 — 정작 쓰는 건 여섯 줄인데 부하 트래픽의 30배가 된다.
+# includedNames 로 거르면 690 바이트다.
+# ⚠️ 여기 적는 건 **미터 이름**이지 Prometheus 에 찍히는 이름이 아니다.
+#    hikaricp_connections_timeout_total 로 적으면 안 잡힌다 — _total 은
+#    counter 를 렌더링할 때 붙는 접미사다. tomcat_threads_busy 도 마찬가지.
+NAMES="hikaricp_connections_active,hikaricp_connections_idle"
+NAMES="$NAMES,hikaricp_connections_pending,hikaricp_connections_max"
+NAMES="$NAMES,hikaricp_connections_timeout,tomcat_threads_busy"
+URL="http://localhost:${PORT}/actuator/prometheus?includedNames=${NAMES}"
+
 command -v curl >/dev/null || { echo "curl 이 필요하다" >&2; exit 2; }
 
 mkdir -p "$(dirname "$OUT")"
@@ -33,7 +44,7 @@ echo "ts_utc,ts_local,active,idle,pending,max,timeout_total,tomcat_busy" > "$OUT
 echo "수집 시작 → $OUT (${INTERVAL}초 간격, 포트 $PORT)" >&2
 
 while true; do
-  body="$(curl -s --max-time 3 "http://localhost:${PORT}/actuator/prometheus" 2>/dev/null || true)"
+  body="$(curl -s --max-time 3 "$URL" 2>/dev/null || true)"
 
   # 메트릭 한 줄에서 값만 뽑는다. 없으면 NA — 수집이 끊긴 구간과 값이 0 인
   # 구간을 구분할 수 있어야 한다.
