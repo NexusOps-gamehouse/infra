@@ -5,4 +5,7 @@ metadata:
   namespace: gamehouse
 spec:
   minReplicas: 2
-  maxReplicas: 8
+  # EKS 장애 주입 실험의 고정 상한: 2개 고정 t3.large에서 chat과 동시 확장 시
+  # 스케줄 불가능한 Pod를 만들지 않도록 2 → 4까지만 허용한다.
+  # 전체 용량·nodegroup autoscaling 설계가 확정되면 별도 부하 시험으로 재산정한다.
+  maxReplicas: 4
