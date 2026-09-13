@@ -16,8 +16,13 @@
 #
 # 멱등하다. 이미 있는 계정은 로그인만 해서 토큰을 새로 받는다.
 #
-# ⚠️ 로컬 kind 전용이다. 계정과 글을 실제로 만들기 때문에 BASE_URL 이
-#    로컬이 아니면 중단한다.
+# ⚠️ 계정과 글을 실제로 만든다. 기본은 로컬 kind 전용이고, BASE_URL 이 로컬이
+#    아니면 중단한다. 운영(EKS) 회차는 ALLOW_EKS_SEED 와 EKS_BASE_URL 을 함께
+#    줘야 통과한다 — 아래 안전장치 참고.
+#
+#    운영에서는 계정을 지울 방법이 없다(user 서비스에 탈퇴 API 가 없고, 사용자
+#    id 를 참조하는 컬럼이 7개 스키마에 흩어져 있는데 스키마 간 외래키가 없다).
+#    그래서 USERS=1 로 최소만 만들고 회차들이 그 계정을 재사용한다.
 # ===========================================================================
 set -Eeuo pipefail
 
@@ -35,9 +40,19 @@ TITLE_PREFIX="${RMQ_TITLE_PREFIX:-[RMQ-TEST]}"
 case "$BASE_URL" in
   http://gamehouse.local|http://gamehouse.local:*|http://localhost:*|http://127.0.0.1:*) ;;
   *)
-    echo "중단: BASE_URL 이 로컬이 아니다 ($BASE_URL)" >&2
-    echo "이 스크립트는 계정을 실제로 생성한다. 로컬 kind 에서만 쓴다." >&2
-    exit 2
+    # 로컬이 아니면 기본은 중단이다. 운영(EKS)은 두 겹을 **모두** 만족해야 통과한다.
+    #   ① ALLOW_EKS_SEED=1        — 의도했다는 표시
+    #   ② EKS_BASE_URL 과 일치    — 어느 운영인지 한 번 더 적게 한다
+    # 환경변수 하나를 잘못 넣어 운영에 쏘는 일을 막기 위해 일부러 중복시킨다.
+    if [[ "${ALLOW_EKS_SEED:-0}" == "1" && -n "${EKS_BASE_URL:-}" \
+          && "$BASE_URL" == "$EKS_BASE_URL" ]]; then
+      echo "⚠️ 운영 환경이다: $BASE_URL" >&2
+    else
+      echo "중단: BASE_URL 이 로컬이 아니다 ($BASE_URL)" >&2
+      echo "  운영에서 쓰려면 두 가지를 모두 준다:" >&2
+      echo "    ALLOW_EKS_SEED=1 EKS_BASE_URL=$BASE_URL BASE_URL=$BASE_URL $0" >&2
+      exit 2
+    fi
     ;;
 esac
 

@@ -40,11 +40,24 @@ current_context() { kubectl config current-context; }
 require_safe_context() {
   local ctx
   ctx="$(current_context)"
-  if [[ "$ctx" != kind-* ]]; then
-    echo "중단: kind 가 아닌 context 에서는 장애를 주입하지 않는다: $ctx" >&2
-    echo "  kubectl config use-context kind-gamehouse-local" >&2
-    exit 2
+  [[ "$ctx" == kind-* ]] && return 0
+
+  # 운영(EKS)은 두 겹을 **모두** 만족해야 통과한다.
+  #   ① ALLOW_EKS_FAULT=1   — 의도했다는 표시
+  #   ② EKS_CONTEXT 와 일치 — 어느 클러스터인지 한 번 더 적게 한다
+  #
+  # 오늘만 세 번, 다른 작업 때문에 current-context 가 EKS 로 넘어가 있었다.
+  # 스위치 하나만으로는 그 상태에서 그대로 통과해 버린다. 그래서 중복시킨다.
+  if [[ "${ALLOW_EKS_FAULT:-0}" == "1" && -n "${EKS_CONTEXT:-}" \
+        && "$ctx" == "$EKS_CONTEXT" ]]; then
+    echo "⚠️ 운영 클러스터에 장애를 주입한다: $ctx" >&2
+    return 0
   fi
+
+  echo "중단: kind 가 아닌 context 에서는 장애를 주입하지 않는다: $ctx" >&2
+  echo "  로컬로 돌아가려면: kubectl config use-context kind-gamehouse-local" >&2
+  echo "  운영 회차라면:     ALLOW_FAULT=1 ALLOW_EKS_FAULT=1 EKS_CONTEXT=$ctx $0 ..." >&2
+  exit 2
 }
 
 require_fault_opt_in() {

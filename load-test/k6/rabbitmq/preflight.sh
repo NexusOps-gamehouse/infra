@@ -59,6 +59,10 @@ check_context() {
 
   if [[ "$ctx" == kind-* ]]; then
     pass "Kubernetes context: $ctx"
+  elif [[ "${ALLOW_EKS_FAULT:-0}" == "1" && -n "${EKS_CONTEXT:-}" && "$ctx" == "$EKS_CONTEXT" ]]; then
+    # inject.sh 와 같은 두 겹 조건이다. 여기만 느슨하면 사전 점검을 통과하고
+    # 정작 주입에서 막히거나, 반대로 점검이 막아 회차를 못 연다.
+    pass "Kubernetes context (운영 명시): $ctx"
   else
     fail "kind-* context가 아님: $ctx"
   fi

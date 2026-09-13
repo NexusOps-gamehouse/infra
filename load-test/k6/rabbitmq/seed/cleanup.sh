@@ -49,7 +49,21 @@ ROUND_ID="$(jq -r '.roundId' "$DATA_DIR/meta.json")"
 
 case "$BASE_URL" in
   http://gamehouse.local|http://gamehouse.local:*|http://localhost:*|http://127.0.0.1:*) ;;
-  *) echo "중단: BASE_URL 이 로컬이 아니다 ($BASE_URL)" >&2; exit 2 ;;
+  *)
+    # 로컬이 아니면 기본은 중단이다. 운영(EKS)은 두 겹을 **모두** 만족해야 통과한다.
+    #   ① ALLOW_EKS_CLEANUP=1        — 의도했다는 표시
+    #   ② EKS_BASE_URL 과 일치    — 어느 운영인지 한 번 더 적게 한다
+    # 환경변수 하나를 잘못 넣어 운영에 쏘는 일을 막기 위해 일부러 중복시킨다.
+    if [[ "${ALLOW_EKS_CLEANUP:-0}" == "1" && -n "${EKS_BASE_URL:-}" \
+          && "$BASE_URL" == "$EKS_BASE_URL" ]]; then
+      echo "⚠️ 운영 환경이다: $BASE_URL" >&2
+    else
+      echo "중단: BASE_URL 이 로컬이 아니다 ($BASE_URL)" >&2
+      echo "  운영에서 쓰려면 두 가지를 모두 준다:" >&2
+      echo "    ALLOW_EKS_CLEANUP=1 EKS_BASE_URL=$BASE_URL BASE_URL=$BASE_URL $0" >&2
+      exit 2
+    fi
+    ;;
 esac
 
 http() { curl -s --max-time 30 "$@" || true; }
