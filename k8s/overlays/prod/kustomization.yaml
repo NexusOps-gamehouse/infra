@@ -105,7 +105,7 @@ images:
     newTag: main-5a1bc6e3925fca0e6d6a5a6f40b8282c4e38f690
   - name: gamehouse-crew
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-crew
-    newTag: main-f27b7b01858c45154aee697df84afce45e91b885
+    newTag: main-26c096cecd972a0a7038cad80a37c918e7ec8c84
   - name: gamehouse-riot
     newName: 359554936090.dkr.ecr.ap-northeast-2.amazonaws.com/gamehouse-riot
     newTag: main-010e5ece8e0819dd2306db5417265e0382c21319
