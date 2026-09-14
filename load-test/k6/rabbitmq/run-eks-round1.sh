@@ -21,6 +21,12 @@ QUEUE_PID=""
 
 note() { RESULT_DIR="$RUN_DIR" "$SCRIPT_DIR/timeline.sh" -t "$1" "${@:2}"; }
 nap() { sleep "$1" & wait $!; }
+
+# 전경 자식을 기다리는 명령은 nap 과 같은 문제를 갖는다. kubectl wait 는
+# --timeout 이 120~300초라, RABBIT_DOWN=1 인 동안 SIGTERM·SIGHUP 이 오면
+# 그 시간만큼 복구 trap 이 미뤄진다. 배경 실행 + wait 로 감싼다.
+# 실측: 맨몸은 TERM 에 10초가 지나도 반응하지 않았고, 감싸면 2초에 복구됐다.
+irun() { "$@" & wait $!; }
 chat_replicas() { "${K[@]}" get deploy chat -o jsonpath='{.spec.replicas}'; }
 chat_uids() { "${K[@]}" get pod -l "$SEL" -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}' | sort | tr '\n' ' '; }
 chat_ready() { "${K[@]}" get pod -l "$SEL" -o jsonpath='{range .items[*]}{.status.containerStatuses[0].ready}{"\n"}{end}' | grep -c true || true; }
@@ -113,16 +119,25 @@ checkpoint chat-drained
 nap 120
 
 # ③ RabbitMQ 90초 완전 중단 및 복구
+#
+# ⚠️ 실제로는 90초가 되지 않는다. Argo CD 의 gamehouse-prod 가 selfHeal 이고,
+#    ignoreDifferences 에는 Deployment 5개만 있다. rabbitmq 는 StatefulSet 이라
+#    replicas: 0 이 **3초 만에 1 로 복원**된다. 1차-3 실측에서 의도한 90초가
+#    39초가 됐다(01:25:50 scale 0 → 01:25:53 Argo CD 동기화 → 01:26:29 Ready).
+#
+#    이것은 고칠 대상이 아니다. rabbitmq 는 HPA 가 없어 Git 이 유일한 진실이므로
+#    예외를 두면 운영 보호가 사라진다. 39초로도 풀 고갈·ALB 504 가 전부 재현됐다.
+#    긴 공백이 꼭 필요하면 시험 직전에 예외를 추가하고 직후에 제거해야 한다.
 note INJECT "rabbitmq scale=0"
 RABBIT_DOWN=1
 "${K[@]}" scale sts rabbitmq --replicas=0
-"${K[@]}" wait --for=delete pod/rabbitmq-0 --timeout=120s
+irun "${K[@]}" wait --for=delete pod/rabbitmq-0 --timeout=120s
 note INJECT "rabbitmq unavailable"
 nap 90
 T0=$(date +%s); note RECOVER "rabbitmq scale=1"
 "${K[@]}" scale sts rabbitmq --replicas=1
 RABBIT_DOWN=0
-"${K[@]}" wait --for=condition=Ready pod/rabbitmq-0 --timeout=300s
+irun "${K[@]}" wait --for=condition=Ready pod/rabbitmq-0 --timeout=300s
 for _ in $(seq 1 60); do
   EP=$("${K[@]}" get endpoints rabbitmq -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | wc -w | tr -d ' ')
   [[ "${EP:-0}" -gt 0 ]] && break
